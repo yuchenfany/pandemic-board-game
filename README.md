@@ -32,11 +32,13 @@ Open two browser windows (one normal, one incognito) to play against yourself.
 - **Move**: click a highlighted city on the map. If there's more than one way to get there, you'll be asked which. Hover a city for details; scroll or use +/− to zoom, and drag to pan.
 - **Other actions**: buttons at the bottom (build, treat, share, cure, role abilities, pass, end actions).
 - **Events**: click a ★ card in your hand. Events can be played at any time, even on someone else's turn.
-- After actions: **Draw** → (epidemic pause for Resilient Population) → **Infect**.
+- **Restart turn** undoes everything you did this turn (locked once Forecast reveals hidden cards). Your turn only moves on when you press **End turn**.
+- After End turn: **Draw** → (epidemic pause for Resilient Population) → **Infect**. These stay separate clicks so anyone can play an event (e.g. One Quiet Night) in between.
+- Hover any role name (or the role badge by your hand) to see what it does.
 - If you go over the hand limit, click cards to discard them before play continues.
 
 ## What's included
-- Full base game: 48 cities, outbreak chains, epidemics, eradication, 6-station limit, 7-card hand limit, every win/loss condition.
+- Full base game with a twist: **Austin** replaces Atlanta (start city) and **Boston** replaces New York. Same colors and connections. 48 cities, outbreak chains, epidemics, eradication, 6-station limit, 7-card hand limit, every win/loss condition.
 - 13 roles: 7 base (2nd ed.) + 6 On the Brink (Archivist, Containment Specialist, Epidemiologist, Field Operative, Generalist, Troubleshooter).
 - 13 events: 5 base + 8 On the Brink. Event count is configurable (default 2 per player, as OtB suggests).
 - Difficulty from Introductory (4 epidemics) up to Legendary (7).
@@ -57,8 +59,12 @@ public/                 the whole site (served by GitHub Pages)
   shared/room.js        lobby/room logic (runs in the host's browser)
   net.js                PeerJS transport: HostNet (authoritative) / GuestNet
   app.js, style.css     UI (vanilla JS + SVG map, no build step)
+  shared/worldmap.js    generated world-map background (do not edit)
 server.js               local static dev server only
+tools/build-worldmap.js regenerates worldmap.js (Natural Earth coastlines bent to the board with a thin-plate spline)
 test/                   rules.js, room.js, sim.js
 ```
+
+Map data: Natural Earth (public domain) via world-atlas.
 
 Fan-made for private play. Pandemic is © Z-Man Games; please don't host this publicly.

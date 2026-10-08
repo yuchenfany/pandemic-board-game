@@ -46,6 +46,24 @@ function toast(msg, kind = 'error') {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.className = ''; }, 3200);
 }
+// Rich hover tooltips for any element with data-tip (+ optional data-tip-title).
+const hoverTip = $('#hovertip');
+document.addEventListener('mouseover', (e) => {
+  const el = e.target.closest ? e.target.closest('[data-tip]') : null;
+  if (!el) { hoverTip.classList.add('hidden'); return; }
+  hoverTip.innerHTML = '';
+  if (el.dataset.tipTitle) hoverTip.append(h('b', null, el.dataset.tipTitle));
+  hoverTip.append(h('div', null, el.dataset.tip));
+  hoverTip.classList.remove('hidden');
+  const r = el.getBoundingClientRect();
+  const x = Math.min(innerWidth - hoverTip.offsetWidth - 8, Math.max(8, r.left + r.width / 2 - hoverTip.offsetWidth / 2));
+  let y = r.top - hoverTip.offsetHeight - 8;
+  if (y < 8) y = r.bottom + 8;
+  hoverTip.style.left = `${x}px`;
+  hoverTip.style.top = `${y}px`;
+});
+const roleTip = (role) => ({ 'data-tip': ROLES[role].text, 'data-tip-title': ROLES[role].name });
+
 const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
   set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch { /* blocked */ } },
@@ -128,7 +146,7 @@ function leaveRoom() {
   if (net) net.close();
   net = null;
   setSession(null);
-  ui.room = ui.game = null; ui.you = -1; ui.logSeen = null;
+  ui.room = ui.game = null; ui.you = -1; ui.logSeen = null; ui.prevCubes = null;
   history.replaceState(null, '', location.pathname);
   homeScreen();
 }
@@ -203,6 +221,7 @@ $('#cancelConnect').onclick = leaveRoom;
   const svg = $('#homeMap');
   svg.setAttribute('viewBox', `0 0 ${MAP_W} ${MAP_H}`);
   svg.setAttribute('preserveAspectRatio', 'xMidYMid slice');
+  svg.append(...landLayers('h'));
   EDGES.forEach(([a, b]) => {
     const A = CITIES[a], B = CITIES[b];
     if (Math.abs(A.x - B.x) < MAP_W / 2) svg.append(s('line', { x1: A.x, y1: A.y, x2: B.x, y2: B.y }));
@@ -215,6 +234,8 @@ function boot() {
   const urlRoom = (new URLSearchParams(location.search).get('room') || '').toUpperCase();
   if (sess && (!urlRoom || urlRoom === sess.code)) {
     const saved = sess.host ? HostNet.savedRoom(sess.code) : null;
+    // A game saved by an older version (e.g. before cities were renamed) can't be resumed.
+    if (saved && saved.game && Object.keys(saved.game.cubes).some(c => !CITIES[c])) saved.game = null;
     if (sess.host && saved) return resumeHosting(sess, saved);
     if (!sess.host) return joinRoom(sess.code, { token: sess.token, name: store.get('pandemic:name') });
     setSession(null);
@@ -314,27 +335,30 @@ function renderLobby() {
 // ------------------------------------------------------------ map
 
 let mapBuilt = false;
+
+// Pandemic-board style continents: glowing coastline over a gridded blue landmass.
+function landLayers(id) {
+  const land = typeof WORLD_LAND === 'string' ? WORLD_LAND : '';
+  const defs = s('defs', null,
+    s('linearGradient', { id: `${id}-land`, x1: 0, y1: 0, x2: 0, y2: 1 },
+      s('stop', { offset: '0%', 'stop-color': '#24577a' }), s('stop', { offset: '100%', 'stop-color': '#173f5c' })),
+    s('pattern', { id: `${id}-grid`, width: 8, height: 8, patternUnits: 'userSpaceOnUse' },
+      s('path', { d: 'M8 0H0V8', fill: 'none', stroke: 'rgba(160,220,255,.10)', 'stroke-width': 0.6 })),
+    s('filter', { id: `${id}-glow`, x: '-5%', y: '-5%', width: '110%', height: '110%' },
+      s('feGaussianBlur', { stdDeviation: 3 })));
+  return [defs,
+    s('path', { d: land, fill: 'none', stroke: '#4fc3ff', 'stroke-width': 5, opacity: 0.35, filter: `url(#${id}-glow)` }),
+    s('path', { d: land, fill: `url(#${id}-land)` }),
+    s('path', { d: land, fill: `url(#${id}-grid)` }),
+    s('path', { d: land, fill: 'none', stroke: '#7fd6ff', 'stroke-width': 0.8, opacity: 0.8 })];
+}
 const edgeEls = {};
 const pawnEls = [];
 
 function buildMap() {
   const svg = $('#map');
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-  const defs = s('defs');
-  COLORS.forEach(c => defs.append(s('radialGradient', { id: `glow-${c}` },
-    s('stop', { offset: '0%', 'stop-color': COLOR_HEX[c], 'stop-opacity': 0.16 }),
-    s('stop', { offset: '100%', 'stop-color': COLOR_HEX[c], 'stop-opacity': 0 }))));
-  const bg = s('g');
-  for (let x = 0; x <= MAP_W; x += 62) bg.append(s('line', { class: 'grat', x1: x, y1: 0, x2: x, y2: MAP_H }));
-  for (let y = 0; y <= MAP_H; y += 55) bg.append(s('line', { class: 'grat', x1: 0, y1: y, x2: MAP_W, y2: y }));
-  // Soft regional glows behind each disease's cities
-  COLORS.forEach(c => {
-    const pts = Object.values(CITIES).filter(v => v.color === c);
-    const cx = pts.reduce((t, p) => t + p.x, 0) / pts.length, cy = pts.reduce((t, p) => t + p.y, 0) / pts.length;
-    const r = Math.max(...pts.map(p => Math.hypot(p.x - cx, p.y - cy))) + 70;
-    bg.append(s('circle', { cx, cy, r, fill: `url(#glow-${c})` }));
-  });
-
+  svg.append(...landLayers('m'));
   const edges = s('g');
   const addEdge = (a, b, attrs) => {
     const el = s('line', { class: 'edge', ...attrs });
@@ -363,7 +387,7 @@ function buildMap() {
     s('text', { y: 24 }, name));
     cities.append(g);
   });
-  svg.append(defs, bg, edges, s('g', { id: 'dyn', class: 'dyn' }), cities, s('g', { id: 'pawns' }));
+  svg.append(edges, s('g', { id: 'dyn', class: 'dyn' }), cities, s('g', { id: 'pawns' }), s('g', { id: 'fx', class: 'dyn' }));
   setupPanZoom(svg);
   applyView();
   mapBuilt = true;
@@ -460,8 +484,9 @@ function hideTip() {
   $('#tip').classList.add('hidden');
 }
 
-function renderMap(g) {
+function renderMap(g, delays = {}) {
   if (!mapBuilt) buildMap();
+  const prev = ui.prevCubes;
   const reach = new Set();
   const myTurn = g.current === ui.you && g.turn.phase === 'actions' && g.status === 'playing';
   if (myTurn) {
@@ -485,15 +510,22 @@ function renderMap(g) {
     let row = 0;
     COLORS.forEach(col => {
       const n = g.cubes[name][col];
-      if (!n) return;
-      for (let k = 0; k < n; k++) {
+      const before = prev ? prev[name][col] : n;
+      const shown = Math.max(n, before);
+      if (!shown) return;
+      for (let k = 0; k < shown; k++) {
         const x = c.x + 12 + k * 10, y = c.y - 17 + row * 11;
-        dyn.append(s('rect', { x, y, width: 9, height: 9, rx: 1.5, fill: COLOR_HEX[col], stroke: 'rgba(0,0,0,.7)', 'stroke-width': 1 }));
-        dyn.append(s('rect', { x: x + 1, y: y + 1, width: 7, height: 2.5, rx: 1, fill: '#fff', opacity: 0.35 }));
+        let cls = 'cube', style = '';
+        if (k >= n) cls += ' cube-gone';
+        else if (k >= before) { cls += ' cube-new'; style = `animation-delay:${(delays[name] || 0) + (k - before) * 140}ms`; }
+        dyn.append(s('g', { class: cls, style },
+          s('rect', { x, y, width: 9, height: 9, rx: 1.5, fill: COLOR_HEX[col], stroke: 'rgba(0,0,0,.7)', 'stroke-width': 1 }),
+          s('rect', { x: x + 1, y: y + 1, width: 7, height: 2.5, rx: 1, fill: '#fff', opacity: 0.35 })));
       }
       row++;
     });
   });
+  ui.prevCubes = JSON.parse(JSON.stringify(g.cubes));
 
   // Pawns are persistent so CSS can animate them between cities.
   const layer = $('#pawns');
@@ -549,22 +581,42 @@ function onCityClick(city) {
 
 // ------------------------------------------------------------ alerts from new log entries
 
-function processLog(g) {
+// Turn new log entries into a timeline of effects. Returns per-city cube delays (so cubes
+// drop in the order cities were infected) and a run() that fires the effects.
+function scanLog(g) {
+  const res = { delays: {}, run: () => {} };
   const count = g.logCount || g.log.length;
-  if (ui.logSeen == null || count < ui.logSeen) { ui.logSeen = count; return; }
+  if (ui.logSeen == null || count < ui.logSeen) { ui.logSeen = count; return res; }
   const fresh = g.log.slice(Math.max(0, g.log.length - (count - ui.logSeen)));
   ui.logSeen = count;
-  const alerts = [];
+  const alerts = [], fx = [], draws = [];
+  const delays = res.delays;
+  let t = 0;
   fresh.forEach((e, i) => {
     let m;
-    if (/drew an EPIDEMIC/.test(e.msg)) {
+    if ((m = e.msg.match(/^(.+?) drew an EPIDEMIC/))) {
       const next = fresh[i + 1] && fresh[i + 1].msg.match(/^Infect (.+?) \(/);
       alerts.push({ big: 'EPIDEMIC', sub: next ? `${next[1]} is hit with 3 cubes` : e.msg, cls: '' });
-    } else if ((m = e.msg.match(/^OUTBREAK in (.+?) \(/))) {
-      flashCity(m[1], 'flash');
-      if (!alerts.some(a => a.big === 'OUTBREAK')) alerts.push({ big: 'OUTBREAK', sub: `${m[1]} — outbreaks ${g.outbreaks}/8`, cls: '' });
-    } else if ((m = e.msg.match(/^Infect (.+?) \(/))) {
-      flashCity(m[1], 'hitpulse');
+      draws.push({ player: m[1], epidemic: true });
+      t += 300;
+    } else if ((m = e.msg.match(/^(.+?) drew (.+)\.$/))) {
+      draws.push({ player: m[1], card: m[2] });
+    } else if ((m = e.msg.match(/^OUTBREAK in (.+?) \((\w+)\)/))) {
+      const [, city, color] = m;
+      const at = t + 150;
+      fx.push([at, () => outbreakFx(city, color)]);
+      PData.ADJ[city].forEach(nb => { if (delays[nb] == null) delays[nb] = at + 500; });
+      if (!alerts.some(a => a.big === 'OUTBREAK')) alerts.push({ big: 'OUTBREAK', sub: `${city} — outbreaks ${g.outbreaks}/8`, cls: '' });
+      t += 650;
+    } else if ((m = e.msg.match(/^Infect (.+?) \((\d) (\w+)\)/))) {
+      const [, city, n, color] = m;
+      t += 450;
+      if (delays[city] == null) delays[city] = t;
+      const at = t;
+      fx.push([at, () => ripple(city, color, Number(n) >= 3)]);
+    } else if ((m = e.msg.match(/^Infection in (.+?) was prevented/))) {
+      const city = m[1], at = t + 450;
+      fx.push([at, () => shield(city)]);
     } else if ((m = e.msg.match(/discovered a cure for (\w+)/))) {
       alerts.push({ big: 'CURE FOUND', sub: `${m[1]} disease cured`, cls: 'good' });
     } else if ((m = e.msg.match(/The (\w+) disease has been ERADICATED/))) {
@@ -573,8 +625,79 @@ function processLog(g) {
       alerts.push({ big: 'YOUR TURN', sub: '', cls: 'warn' });
     }
   });
-  showAlerts(alerts);
+  res.run = () => {
+    fx.forEach(([at, fn]) => setTimeout(fn, at));
+    showAlerts(alerts);
+    animateDraws(g, draws);
+  };
+  return res;
 }
+
+function fxEl(el, ms) { $('#fx').append(el); setTimeout(() => el.remove(), ms); return el; }
+function ripple(city, color, big) {
+  const c = CITIES[city];
+  fxEl(s('circle', { class: 'ripple' + (big ? ' big' : ''), cx: c.x, cy: c.y, r: 12, stroke: COLOR_HEX[color] }), 1500);
+  if (big) fxEl(s('circle', { class: 'ripple big', cx: c.x, cy: c.y, r: 12, stroke: COLOR_HEX[color], style: 'animation-delay:.25s' }), 1800);
+  flashCity(city, 'hitpulse');
+}
+function outbreakFx(city, color) {
+  const c = CITIES[city];
+  fxEl(s('circle', { class: 'shock', cx: c.x, cy: c.y, r: 14, stroke: COLOR_HEX[color] }), 1300);
+  flashCity(city, 'flash');
+  PData.ADJ[city].forEach(nb => {
+    const n = CITIES[nb];
+    let tx = n.x;
+    if (Math.abs(tx - c.x) > MAP_W / 2) tx += tx < c.x ? MAP_W : -MAP_W; // fly across the Pacific edge
+    const dot = fxEl(s('circle', { class: 'spark', r: 4.5, cx: 0, cy: 0, fill: COLOR_HEX[color] }), 1000);
+    dot.style.transform = `translate(${c.x}px, ${c.y}px)`;
+    requestAnimationFrame(() => requestAnimationFrame(() => { dot.style.transform = `translate(${tx}px, ${n.y}px)`; dot.style.opacity = '0.3'; }));
+  });
+}
+function shield(city) {
+  const c = CITIES[city];
+  fxEl(s('circle', { class: 'shieldfx', cx: c.x, cy: c.y, r: 20 }), 1300);
+}
+
+// Cards fly from the player deck to whoever drew them; epidemics fly to the middle of the map.
+function animateDraws(g, draws) {
+  const from = document.getElementById('deckStat');
+  if (!from || !draws.length) return;
+  draws.forEach((d, i) => {
+    const pi = g.players.findIndex(p => p.name === d.player);
+    let target, label, cls;
+    if (d.epidemic) {
+      target = $('#mapwrap'); label = '☣ EPIDEMIC'; cls = 'epi';
+    } else {
+      const city = CITIES[d.card];
+      const ev = Object.values(EVENTS).find(e => e.name === d.card);
+      label = ev ? `★ ${ev.name}` : d.card;
+      cls = ev ? 'event' : city ? city.color : '';
+      target = pi === ui.you ? document.querySelector(`#myhand .pcard[data-card="${CSS.escape(d.card)}"]`) : null;
+      target = target || document.querySelector(`#players .player[data-idx="${pi}"]`) || $('#myhand');
+    }
+    const mine = target.classList.contains('pcard');
+    if (mine) target.classList.add('incoming');
+    setTimeout(() => flyCard(from, target, label, cls, () => {
+      if (mine) { target.classList.remove('incoming'); target.classList.add('pcard-new'); }
+      else if (!d.epidemic) { target.classList.add('got-card'); setTimeout(() => target.classList.remove('got-card'), 900); }
+    }), i * 550);
+  });
+}
+function flyCard(fromEl, toEl, label, cls, done) {
+  const a = fromEl.getBoundingClientRect(), b = toEl.getBoundingClientRect();
+  const W = 96, H = 60;
+  const card = h('div', { class: `flycard ${cls}`, style: { left: `${a.left + a.width / 2 - W / 2}px`, top: `${a.top + a.height / 2 - H / 2}px` } },
+    h('div', { class: 'band' }), h('div', { class: 'fl' }, label));
+  $('#flylayer').append(card);
+  const dx = b.left + b.width / 2 - (a.left + a.width / 2), dy = b.top + b.height / 2 - (a.top + a.height / 2);
+  const scale = cls === 'epi' ? 2.2 : 1;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    card.style.transform = `translate(${dx}px, ${dy}px) rotate(${cls === 'epi' ? 0 : -6 + Math.random() * 12}deg) scale(${scale})`;
+  }));
+  setTimeout(() => { card.classList.add('land'); if (done) done(); }, 700);
+  setTimeout(() => card.remove(), cls === 'epi' ? 1500 : 1000);
+}
+
 function flashCity(city, cls) {
   const el = document.querySelector(`#map [data-city="${CSS.escape(city)}"]`);
   if (!el) return;
@@ -605,7 +728,7 @@ function showAlerts(list) {
 const chip = (card, opts = {}) => {
   if (Engine.isEvent(card)) {
     const ev = EVENTS[Engine.eventKey(card)];
-    return h('span', { class: 'chip event' + (opts.onclick ? ' clickable' : ''), title: ev.text, onclick: opts.onclick }, '★ ' + ev.name);
+    return h('span', { class: 'chip event' + (opts.onclick ? ' clickable' : ''), 'data-tip': ev.text, 'data-tip-title': ev.name, onclick: opts.onclick }, '★ ' + ev.name);
   }
   const col = CITIES[card] ? CITIES[card].color : 'black';
   return h('span', { class: `chip ${col}` + (opts.onclick ? ' clickable' : ''), style: { background: COLOR_HEX[col] }, onclick: opts.onclick }, card);
@@ -613,15 +736,16 @@ const chip = (card, opts = {}) => {
 
 function renderGame() {
   const g = ui.game;
+  const effects = scanLog(g);
   renderTopbar(g);
-  renderMap(g);
+  renderMap(g, effects.delays);
   renderPlayers(g);
   renderBanner(g);
   renderTurnRow(g);
   renderHand(g);
   renderLog(g);
   renderChat();
-  processLog(g);
+  effects.run();
   maybeOpenForecast(g);
 }
 
@@ -643,7 +767,7 @@ function renderTopbar(g) {
       h('div', { class: 'supply' }, COLORS.map(c => h('div', { class: 'bar' + (g.supply[c] <= 5 ? ' low' : '') },
         h('div', { class: 'bg' }, h('i', { style: { width: `${(g.supply[c] / 24) * 100}%`, background: COLOR_HEX[c] } })), g.supply[c])))),
     h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Deck'),
-      h('span', { title: 'Player cards left' }, `🂠 ${g.playerDeckCount}`),
+      h('span', { id: 'deckStat', 'data-tip': 'Cards left in the player deck. You lose if you must draw and cannot.' }, `🂠 ${g.playerDeckCount}`),
       h('span', { class: 'muted small' }, `${g.epidemicsLeft} epidemic${g.epidemicsLeft === 1 ? '' : 's'} left`)),
     h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Stations'), `🏥 ${g.stations.length}/${Engine.MAX_STATIONS}`),
     ...[g.quietNight ? h('span', { class: 'tag' }, '🌙 Quiet night') : null,
@@ -698,14 +822,14 @@ function renderPlayers(g) {
     const mine = i === ui.you;
     const seat = ui.room.seats[i];
     const over = g.overLimit.includes(i);
-    box.append(h('div', { class: 'player' + (i === g.current ? ' current' : ''), style: { '--rc': role.color } },
+    box.append(h('div', { class: 'player' + (i === g.current ? ' current' : ''), 'data-idx': i, style: { '--rc': role.color } },
       h('div', { class: 'hdr' },
         h('span', { class: 'pawnchip', style: { background: role.color } }),
         h('span', { class: 'nm' }, p.name, mine ? h('span', { class: 'muted' }, ' (you)') : ''),
         i === g.current ? h('span', { class: 'turn-tag' }, 'TURN') : null,
         h('span', { class: 'dot' + (seat && seat.connected ? ' on' : ''), title: seat && seat.connected ? 'online' : 'offline' }),
         h('span', { class: 'loc' }, '📍 ', p.location)),
-      h('div', { class: 'role', title: role.text }, h('b', null, role.name), ' · ',
+      h('div', { class: 'role' }, h('b', roleTip(p.role), role.name, ' ⓘ'), ' · ',
         h('span', { class: over ? 'over' : '' }, `${p.hand.length}/${g.handLimits[i]} cards`)),
       h('div', { class: 'hand' },
         p.hand.map(c => chip(c)),
@@ -721,7 +845,9 @@ function renderHand(g) {
   const me = g.players[ui.you];
   const over = g.overLimit.includes(ui.you);
   const playing = g.status === 'playing';
-  box.append(h('div', { class: 'label' }, h('b', null, 'Your hand'), `${me.hand.length}/${g.handLimits[ui.you]} cards`,
+  box.append(h('div', { class: 'label' },
+    h('span', { class: 'rolebadge', style: { '--rc': ROLES[me.role].color }, ...roleTip(me.role) }, ROLES[me.role].name, ' ⓘ'),
+    h('b', null, 'Your hand'), `${me.hand.length}/${g.handLimits[ui.you]} cards`,
     over ? h('span', { class: 'over' }, 'Discard!') : null));
   const sorted = me.hand.slice().sort((a, b) => {
     const ka = Engine.isEvent(a) ? 9 : COLORS.indexOf(CITIES[a].color), kb = Engine.isEvent(b) ? 9 : COLORS.indexOf(CITIES[b].color);
@@ -734,9 +860,10 @@ function renderHand(g) {
       if (isEv) onclick = () => (over && !stored) ? discardOrPlay(card) : playEventDialog(card, stored);
       else if (over) onclick = () => send({ type: 'discard', card });
     }
-    const title = isEv ? EVENTS[Engine.eventKey(card)].text : (over ? 'Click to discard' : `${CITIES[card].color} city card`);
+    const tip = isEv ? { 'data-tip': EVENTS[Engine.eventKey(card)].text + ' Click to play.', 'data-tip-title': EVENTS[Engine.eventKey(card)].name }
+      : { title: over ? 'Click to discard' : `${CITIES[card].color} city card` };
     return h('div', { class: 'pcard' + (isEv ? ' event' : '') + (onclick ? ' clickable' : '') + (over && !stored ? ' discard' : '') + (card === me.location ? ' here' : ''),
-      style: { '--c': isEv ? '#9c6a00' : COLOR_HEX[CITIES[card].color] }, title, onclick },
+      style: { '--c': isEv ? '#9c6a00' : COLOR_HEX[CITIES[card].color] }, 'data-card': isEv ? EVENTS[Engine.eventKey(card)].name : card, ...tip, onclick },
     h('div', { class: 'cn' }, isEv ? '★ ' + EVENTS[Engine.eventKey(card)].name : card),
     h('div', { class: 'cc' }, isEv ? (stored ? 'stored event' : 'event · play anytime') : CITIES[card].color));
   };
@@ -775,6 +902,9 @@ function renderBanner(g) {
   if (g.rvdColor && g.players.some(p => p.hand.includes('E:rapidVaccineDeployment') || p.stored === 'E:rapidVaccineDeployment')) {
     msg('💉 Rapid Vaccine Deployment can be played now (before the next action).', 'warn');
   }
+  if (g.current === ui.you && g.turn.phase === 'actions' && g.turn.actionsLeft <= 0) {
+    msg('All actions used — press End turn to draw cards, or Restart turn to redo your moves.', 'warn');
+  }
   if (g.turn.phase === 'epidemic') msg('☣ Epidemic! Last chance to play Resilient Population before Intensify.', 'warn');
 }
 
@@ -787,8 +917,8 @@ function renderTurnRow(g) {
   const total = g.turn.actionsLeft + g.turn.actionsTaken;
   const n = g.quietNight ? 0 : g.travelBan != null ? 1 : g.infectionRate;
   bar.append(
-    h('span', { class: 'whose' }, h('span', { class: 'pawnchip', style: { background: ROLES[cur.role].color } }),
-      g.current === ui.you ? 'Your turn' : `${cur.name}'s turn`),
+    h('span', { class: 'whose', ...roleTip(cur.role) }, h('span', { class: 'pawnchip', style: { background: ROLES[cur.role].color } }),
+      g.current === ui.you ? 'Your turn' : `${cur.name}'s turn`, h('span', { class: 'muted small' }, ` · ${ROLES[cur.role].name}`)),
     h('div', { class: 'stepper' },
       h('span', { class: 'step' + (ph === 'actions' ? ' on' : '') }, 'Actions',
         h('span', { class: 'pips' }, Array.from({ length: total }, (_, i) => h('i', { class: i < g.turn.actionsTaken ? 'used' : '' })))),
@@ -799,8 +929,10 @@ function renderTurnRow(g) {
   if (g.status !== 'playing' || g.current !== ui.you) return;
 
   const add = (...els) => bar.append(...els);
-  const btn = (icon, label, onclick, opts = {}) => h('button', { onclick, disabled: opts.disabled, class: 'act ' + (opts.class || ''), title: opts.title, style: opts.style },
-    h('span', { class: 'ic' }, icon), label);
+  const noActions = ph === 'actions' && g.turn.actionsLeft <= 0;
+  const btn = (icon, label, onclick, opts = {}) => h('button', { onclick, disabled: opts.disabled || (opts.act !== false && noActions),
+    class: 'act ' + (opts.class || ''), title: opts.title, style: opts.style },
+  h('span', { class: 'ic' }, icon), label);
 
   if (ph === 'draw') add(btn('🂠', 'Draw 2 player cards', () => send({ type: 'draw' }), { class: 'primary' }));
   if (ph === 'epidemic') add(btn('☣', 'Continue: Intensify', () => send({ type: 'continue' }), { class: 'primary' }));
@@ -860,12 +992,18 @@ function renderTurnRow(g) {
     g.players.forEach((q, qi) => { if (qi !== ui.you && q.location === here) q.hand.filter(Engine.isCity).forEach(c => opts.push({ qi, c })); });
     add(btn('🔬', 'Take card (free)', () => openChoice('Epidemiologist: take a City card', opts.map(o => ({
       label: `Take ${o.c} from ${g.players[o.qi].name}`, onClick: () => send({ type: 'epidemiologistTake', from: o.qi, card: o.c }),
-    }))), { disabled: g.turn.flags.epidemiologist || !opts.length }));
+    }))), { disabled: g.turn.flags.epidemiologist || !opts.length, act: false }));
   }
 
   add(h('span', { class: 'spacer' }),
+    btn('↺', 'Restart turn', () => openChoice('Restart your turn?', [{ label: '↺ Yes, undo everything I did this turn', onClick: () => send({ type: 'restartTurn' }) }],
+      'Moves, treatments, cards and events used this turn are put back as they were when your turn began.'),
+    { class: 'ghost', act: false, disabled: !g.canRestart,
+      title: g.turn.flags.revealed ? 'Locked: hidden cards were revealed this turn (Forecast)' : 'Undo all of this turn\'s actions' }),
     btn('⏭', 'Pass', () => send({ type: 'pass' }), { class: 'ghost', title: 'Spend one action doing nothing' }),
-    btn('✋', 'End actions', () => openChoice('End your actions?', [{ label: `Yes, skip my remaining ${g.turn.actionsLeft} action(s)`, onClick: () => send({ type: 'endActions' }) }]), { class: 'ghost' }));
+    btn('✋', 'End turn', () => (g.turn.actionsLeft > 0
+      ? openChoice('End your turn?', [{ label: `Yes, skip my remaining ${g.turn.actionsLeft} action(s) and draw`, onClick: () => send({ type: 'endActions' }) }])
+      : send({ type: 'endActions' })), { class: noActions ? 'primary' : 'ghost', act: false, title: 'Finish actions, then draw 2 cards and infect' }));
 }
 
 function cureDialog(g, colors) {

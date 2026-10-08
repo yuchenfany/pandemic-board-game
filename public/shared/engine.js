@@ -62,7 +62,7 @@
       players: [],
       cubes: Object.fromEntries(CITY_NAMES.map(c => [c, { blue: 0, yellow: 0, black: 0, red: 0 }])),
       supply: Object.fromEntries(COLORS.map(c => [c, CUBES_PER_COLOR])),
-      stations: ['Atlanta'],
+      stations: ['Austin'],
       cures: Object.fromEntries(COLORS.map(c => [c, 'none'])), // none | cured | eradicated
       rateIdx: 0,
       outbreaks: 0,
@@ -96,7 +96,7 @@
     s.players = players.map(p => ({
       name: p.name,
       role: p.role || freeRoles.pop(),
-      location: 'Atlanta',
+      location: 'Austin',
       hand: [],
       stored: null, // Contingency Planner
       samples: { blue: 0, yellow: 0, black: 0, red: 0 }, // Field Operative
@@ -141,6 +141,9 @@
       drawsLeft: 0,
       flags: {},
     };
+    // Snapshot for "Restart turn" (everything except the snapshot itself).
+    s.turnStart = null;
+    s.turnStart = JSON.parse(JSON.stringify(s));
   }
 
   // ---------------------------------------------------------------- helpers
@@ -262,7 +265,7 @@
   // Legal ways for `actorIdx` (the current player) to move `pawnIdx` to `to`.
   function getMoveOptions(s, actorIdx, pawnIdx, to) {
     const res = [];
-    if (!s.turn || s.turn.phase !== 'actions' || actorIdx !== s.current) return res;
+    if (!s.turn || s.turn.phase !== 'actions' || s.turn.actionsLeft <= 0 || actorIdx !== s.current) return res;
     const actor = s.players[actorIdx], pawn = s.players[pawnIdx];
     if (!actor || !pawn || !CITIES[to]) return res;
     const from = pawn.location;
@@ -319,11 +322,14 @@
     if (s.turn.phase !== 'actions' || s.turn.actionsLeft <= 0) fail('No actions left this turn');
   }
 
+  // The turn stays in the actions phase (so it can still be restarted) until the player ends it.
   function spendAction(s) {
     s.turn.actionsLeft--;
     s.turn.actionsTaken++;
-    if (s.turn.actionsLeft <= 0) s.turn.phase = 'draw';
   }
+
+  const canRestart = (s) => !!s.turnStart && s.status === 'playing' && s.turn.phase === 'actions' &&
+    !s.interrupt && !s.turn.flags.revealed;
 
   function continueDrawing(s) {
     const p = s.players[s.current];
@@ -406,6 +412,7 @@
       case 'forecast': {
         const cards = s.infectionDeck.splice(-FORECAST_COUNT).reverse(); // top first
         s.interrupt = { type: 'forecast', player: pid, cards };
+        s.turn.flags.revealed = true; // hidden cards seen: the turn can no longer be restarted
         break;
       }
       case 'governmentGrant': {
@@ -454,7 +461,6 @@
           const prevMax = s.turn.actionsLeft + s.turn.actionsTaken;
           if (prevMax === 5 && max === 4) s.turn.actionsLeft = Math.max(0, s.turn.actionsLeft - 1);
           if (prevMax === 4 && max === 5) s.turn.actionsLeft++;
-          if (s.turn.actionsLeft === 0) s.turn.phase = 'draw';
         }
         onEnter(s, i);
         break;
@@ -666,9 +672,20 @@
         log(s, `${p.name} passed an action.`);
         spendAction(s);
         break;
+      case 'restartTurn': {
+        if (pid !== s.current) fail("It's not your turn");
+        if (!canRestart(s)) fail(s.turn.flags.revealed ? 'Cannot restart after hidden cards were revealed (Forecast)' : 'Nothing to restart');
+        const snap = s.turnStart;
+        const { log: _l, logCount } = s;
+        Object.keys(s).forEach(k => delete s[k]);
+        Object.assign(s, JSON.parse(JSON.stringify(snap)), { turnStart: snap, logCount });
+        log(s, `${p.name} restarted their turn.`);
+        break;
+      }
       case 'endActions':
-        requireActionTurn(s, pid);
-        log(s, `${p.name} ended their actions.`);
+        if (pid !== s.current) fail("It's not your turn");
+        if (s.turn.phase !== 'actions') fail('Your actions are already over');
+        log(s, s.turn.actionsLeft > 0 ? `${p.name} ended their turn early.` : `${p.name} ended their actions.`);
         s.turn.actionsLeft = 0;
         s.turn.phase = 'draw';
         break;
@@ -721,6 +738,9 @@
     v.infectionDeckCount = s.infectionDeck.length;
     delete v.playerDeck;
     delete v.infectionDeck;
+    delete v.turnStart;
+    v.canRestart = canRestart(s) && JSON.stringify({ ...s, turnStart: null, log: null, logCount: null }) !==
+      JSON.stringify({ ...s.turnStart, turnStart: null, log: null, logCount: null });
     v.infectionRate = RATES[s.rateIdx];
     v.overLimit = overLimit(s);
     v.handLimits = s.players.map(handLimit);

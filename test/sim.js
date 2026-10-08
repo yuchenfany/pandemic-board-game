@@ -91,7 +91,8 @@ function candidates(s) {
   out.push([cur, { type: 'contingencyTake', card: pick(s.playerDiscard.filter(E.isEvent)) }]);
   out.push([cur, { type: 'archivistRetrieve' }]);
   s.players.forEach((q, i) => q.hand.forEach(c => out.push([cur, { type: 'epidemiologistTake', from: i, card: c }])));
-  if (Math.random() < 0.02) out.push([cur, { type: 'endActions' }]);
+  if (Math.random() < 0.02 || s.turn.actionsLeft === 0) out.push([cur, { type: 'endActions' }]);
+  if (Math.random() < 0.01) out.push([cur, { type: 'restartTurn' }]);
   return out;
 }
 
@@ -119,7 +120,7 @@ function playOne(nPlayers, epidemics) {
     }
     if (!moved) {
       // fall back to any always-legal action
-      const forced = cands.find(([, a]) => ['draw', 'continue', 'infect', 'pass', 'discard', 'forecastOrder'].includes(a.type));
+      const forced = cands.find(([, a]) => ['draw', 'continue', 'infect', 'endActions', 'discard', 'forecastOrder'].includes(a.type));
       assert(forced, 'stuck: ' + JSON.stringify(s.turn) + ' ' + JSON.stringify(cands.slice(0, 3)));
       s = E.apply(s, forced[0], forced[1]);
     }

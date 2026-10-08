@@ -107,7 +107,6 @@ a.link:hover { text-decoration: underline; }
 #mapwrap { position: relative; min-height: 0; overflow: hidden; background: radial-gradient(ellipse at center, #133049 0%, #08141f 85%); touch-action: none; }
 #map { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; }
 #map.dragging { cursor: grabbing; }
-#map .grat { stroke: rgba(120,170,220,.07); stroke-width: 1; }
 #map .edge { stroke: rgba(255,255,255,.22); stroke-width: 1.3; transition: stroke .15s; }
 #map .edge.hot { stroke: rgba(255,255,255,.85); stroke-width: 2.2; }
 #map .city { cursor: pointer; }
@@ -249,4 +248,51 @@ a.link:hover { text-decoration: underline; }
   .lobby-grid { grid-template-columns: 1fr; }
   #dock { position: sticky; bottom: 0; z-index: 5; }
   .topbtns { margin-left: 0; }
+}
+
+/* ---------- Tooltips ---------- */
+#hovertip { position: fixed; z-index: 30; max-width: 280px; pointer-events: none; background: rgba(10,18,28,.97); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.45; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+#hovertip b { display: block; font-size: 13px; margin-bottom: 2px; color: var(--accent); }
+[data-tip] { cursor: help; }
+.pcard[data-tip], .chip.clickable[data-tip] { cursor: pointer; }
+.rolebadge { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; font-size: 11px; font-weight: 700; color: var(--text);
+  background: color-mix(in srgb, var(--rc) 25%, transparent); border: 1px solid var(--rc); border-radius: 999px; padding: 1px 8px; margin-bottom: 4px; white-space: nowrap; }
+
+/* ---------- Infection animations ---------- */
+#map .cube, #map .ripple, #map .shock, #map .shieldfx { transform-box: fill-box; transform-origin: center; }
+#map .cube-new { animation: cubeDrop .55s cubic-bezier(.2,1.6,.4,1) both; }
+#map .cube-gone { animation: cubeGone .5s ease-in forwards; }
+@keyframes cubeDrop { from { transform: translateY(-22px) scale(.2); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes cubeGone { to { transform: translateY(-8px) scale(0); opacity: 0; } }
+#map .ripple { fill: none; stroke-width: 3; animation: ripple 1.1s ease-out both; }
+#map .ripple.big { stroke-width: 4; animation-duration: 1.4s; }
+@keyframes ripple { from { transform: scale(.5); opacity: 1; } to { transform: scale(3.4); opacity: 0; } }
+#map .shock { fill: none; stroke-width: 5; animation: shock 1.1s ease-out both; }
+@keyframes shock { 0% { transform: scale(.4); opacity: 1; stroke-width: 8; } 100% { transform: scale(6); opacity: 0; stroke-width: 1; } }
+#map .spark { transition: transform .6s cubic-bezier(.5,0,.7,1), opacity .6s; filter: drop-shadow(0 0 4px #fff); }
+#map .shieldfx { fill: rgba(70,196,107,.15); stroke: var(--good); stroke-width: 2.5; stroke-dasharray: 5 3; animation: shieldfx 1.2s ease-out both; }
+@keyframes shieldfx { 0% { transform: scale(.6); opacity: 0; } 30% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1.3); opacity: 0; } }
+
+/* ---------- Card draw animations ---------- */
+#flylayer { position: fixed; inset: 0; pointer-events: none; z-index: 25; }
+.flycard { position: fixed; width: 96px; height: 60px; border-radius: 8px; background: #f4f1ea; color: #1b2430; border: 1px solid rgba(0,0,0,.35);
+  box-shadow: 0 10px 28px rgba(0,0,0,.55); overflow: hidden; transition: transform .7s cubic-bezier(.25,.9,.3,1.05), opacity .3s; font-weight: 700; font-size: 12px; }
+.flycard .band { height: 8px; background: #888; }
+.flycard .fl { padding: 6px 8px; line-height: 1.15; }
+.flycard.blue .band { background: var(--blue); } .flycard.yellow .band { background: var(--yellow); }
+.flycard.black .band { background: var(--black); } .flycard.red .band { background: var(--red); }
+.flycard.event { background: linear-gradient(150deg, #fbe39b, #e7ac2c); } .flycard.event .band { background: #9c6a00; }
+.flycard.epi { background: linear-gradient(150deg, #5a0f0b, #b3261e); color: #fff; text-align: center; letter-spacing: 1px; }
+.flycard.epi .band { background: #ff6a5f; }
+.flycard.land { opacity: 0; }
+.flycard.epi.land { opacity: 0; transition: opacity .8s; }
+.pcard.incoming { opacity: 0; }
+.pcard.pcard-new { animation: newcard 1.2s ease; }
+@keyframes newcard { 0% { transform: translateY(-10px) scale(1.08); box-shadow: 0 0 0 3px var(--gold), 0 10px 24px rgba(0,0,0,.5); } 100% { transform: none; } }
+.player.got-card { animation: gotcard .9s ease; }
+@keyframes gotcard { 30% { box-shadow: 0 0 0 2px var(--gold) inset, 0 0 22px rgba(240,185,62,.45); } }
+@media (prefers-reduced-motion: reduce) {
+  #map .cube-new, #map .cube-gone, #map .ripple, #map .shock, #map .shieldfx, .pcard.pcard-new { animation: none; }
+  .flycard, #map .spark, #map .pawn { transition: none; }
 }

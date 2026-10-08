@@ -22,7 +22,7 @@ function fresh(roles, hands = []) {
 const expectFail = (fn, re) => assert.throws(fn, (e) => e instanceof E.GameError && (!re || re.test(e.message)));
 
 test('drive, direct and charter flights', () => {
-  let s = fresh(['scientist', 'medic'], [['Tokyo', 'Atlanta']]);
+  let s = fresh(['scientist', 'medic'], [['Tokyo', 'Austin']]);
   s = E.apply(s, 0, { type: 'move', to: 'Chicago', method: 'drive' });
   assert.strictEqual(s.players[0].location, 'Chicago');
   expectFail(() => E.apply(s, 0, { type: 'move', to: 'Paris', method: 'drive' }));
@@ -32,7 +32,35 @@ test('drive, direct and charter flights', () => {
   s = E.apply(s, 0, { type: 'move', to: 'Lima', method: 'charter' });
   assert.strictEqual(s.turn.actionsLeft, 1);
   s = E.apply(s, 0, { type: 'pass' });
+  assert.strictEqual(s.turn.phase, 'actions', 'waits for End turn');
+  expectFail(() => E.apply(s, 0, { type: 'pass' }), /No actions left/);
+  s = E.apply(s, 0, { type: 'endActions' });
   assert.strictEqual(s.turn.phase, 'draw');
+});
+
+test('restart turn restores the start of the turn', () => {
+  let s = E.createGame({ players: [{ name: 'A', role: 'scientist' }, { name: 'B', role: 'medic' }], epidemics: 4, eventCount: 0 });
+  const cur = s.current;
+  const start = JSON.stringify({ ...s, turnStart: null, log: null, logCount: null });
+  assert.strictEqual(E.view(s).canRestart, false, 'nothing to undo yet');
+  s = E.apply(s, cur, { type: 'move', to: 'Chicago', method: 'drive' });
+  s = E.apply(s, cur, { type: 'pass' });
+  assert.strictEqual(E.view(s).canRestart, true);
+  expectFail(() => E.apply(s, 1 - cur, { type: 'restartTurn' }), /not your turn/);
+  s = E.apply(s, cur, { type: 'restartTurn' });
+  assert.strictEqual(JSON.stringify({ ...s, turnStart: null, log: null, logCount: null }), start);
+  assert(/restarted/.test(s.log[s.log.length - 1].msg));
+  assert(!('turnStart' in E.view(s)), 'snapshot never sent to clients');
+  s = E.apply(s, cur, { type: 'endActions' });
+  expectFail(() => E.apply(s, cur, { type: 'restartTurn' }), /Nothing to restart/);
+});
+
+test('restart is locked after Forecast reveals cards', () => {
+  let s = fresh(['scientist', 'medic'], [['E:forecast']]);
+  s.turnStart = JSON.parse(JSON.stringify({ ...s, turnStart: null }));
+  s = E.apply(s, 0, { type: 'playEvent', card: 'E:forecast' });
+  s = E.apply(s, 0, { type: 'forecastOrder', order: s.interrupt.cards.slice() });
+  expectFail(() => E.apply(s, 0, { type: 'restartTurn' }), /Forecast/);
 });
 
 test('outbreak chain and outbreak counter', () => {
@@ -69,7 +97,7 @@ test('quarantine specialist and medic protect', () => {
 });
 
 test('cure, medic auto-treat, eradication, win', () => {
-  const blue = ['Atlanta', 'Chicago', 'Montreal', 'New York', 'Washington'];
+  const blue = ['Austin', 'Chicago', 'Montreal', 'Boston', 'Washington'];
   let s = fresh(['scientist', 'medic'], [blue.slice(0, 4)]);
   s.cubes['Paris'].blue = 2; s.supply.blue -= 2; s.players[1].location = 'Paris';
   s.cures.yellow = s.cures.black = 'cured';
@@ -83,13 +111,13 @@ test('cure, medic auto-treat, eradication, win', () => {
 });
 
 test('non-scientist needs 5; field operative samples', () => {
-  const blue = ['Chicago', 'Montreal', 'New York', 'Washington'];
+  const blue = ['Chicago', 'Montreal', 'Boston', 'Washington'];
   let s = fresh(['fieldOperative', 'medic'], [blue.slice()]);
   expectFail(() => E.apply(s, 0, { type: 'cure', color: 'blue', cards: blue }), /exactly 5/);
-  s.cubes['Atlanta'].blue = 3; s.supply.blue -= 3;
+  s.cubes['Austin'].blue = 3; s.supply.blue -= 3;
   s = E.apply(s, 0, { type: 'fieldSample', color: 'blue' });
   expectFail(() => E.apply(s, 0, { type: 'fieldSample', color: 'blue' }), /Already/);
-  s.players[0].samples.blue = 3; s.cubes['Atlanta'].blue = 0;
+  s.players[0].samples.blue = 3; s.cubes['Austin'].blue = 0;
   s = E.apply(s, 0, { type: 'cure', color: 'blue', cards: blue.slice(0, 3), useSamples: true });
   assert.strictEqual(s.cures.blue, 'eradicated');
   assert.strictEqual(s.supply.blue, 24);
@@ -121,17 +149,17 @@ test('hand limit blocks progress; archivist holds 8', () => {
 });
 
 test('share knowledge and researcher', () => {
-  let s = fresh(['scientist', 'researcher'], [['Atlanta', 'Paris'], ['Tokyo']]);
+  let s = fresh(['scientist', 'researcher'], [['Austin', 'Paris'], ['Tokyo']]);
   expectFail(() => E.apply(s, 0, { type: 'share', mode: 'give', other: 1, card: 'Paris' }));
   s = E.apply(s, 0, { type: 'share', mode: 'take', other: 1, card: 'Tokyo' });
-  s = E.apply(s, 0, { type: 'share', mode: 'give', other: 1, card: 'Atlanta' });
-  assert.deepStrictEqual(s.players[1].hand, ['Atlanta']);
+  s = E.apply(s, 0, { type: 'share', mode: 'give', other: 1, card: 'Austin' });
+  assert.deepStrictEqual(s.players[1].hand, ['Austin']);
 });
 
 test('dispatcher, ops expert, troubleshooter, generalist, containment', () => {
   let s = fresh(['dispatcher', 'medic'], [['Tokyo']]);
   s.players[1].location = 'Lima';
-  s = E.apply(s, 0, { type: 'move', pawn: 1, to: 'Atlanta', method: 'dispatch' });
+  s = E.apply(s, 0, { type: 'move', pawn: 1, to: 'Austin', method: 'dispatch' });
   s = E.apply(s, 0, { type: 'move', pawn: 1, to: 'Tokyo', method: 'direct' });
   assert.strictEqual(s.players[1].location, 'Tokyo');
 
@@ -169,10 +197,10 @@ test('contingency planner, epidemiologist, archivist', () => {
   assert(s.players[0].hand.includes('Paris'));
 
   s = fresh(['archivist', 'scientist']);
-  if (!s.playerDiscard.includes('Atlanta')) s.playerDiscard.push('Atlanta');
-  s.playerDeck = s.playerDeck.filter(c => c !== 'Atlanta');
+  if (!s.playerDiscard.includes('Austin')) s.playerDiscard.push('Austin');
+  s.playerDeck = s.playerDeck.filter(c => c !== 'Austin');
   s = E.apply(s, 0, { type: 'archivistRetrieve' });
-  assert(s.players[0].hand.includes('Atlanta'));
+  assert(s.players[0].hand.includes('Austin'));
 });
 
 test('events: forecast, grant, travel ban, borrowed time, RVD, remote treatment', () => {
@@ -193,7 +221,7 @@ test('events: forecast, grant, travel ban, borrowed time, RVD, remote treatment'
   s = E.apply(s, 0, { type: 'infect' });
   assert.strictEqual(s.infectionDiscard.length, before + 1, 'travel ban: 1 card');
 
-  const blue = ['Atlanta', 'Chicago', 'Montreal', 'New York'];
+  const blue = ['Austin', 'Chicago', 'Montreal', 'Boston'];
   s = fresh(['scientist', 'medic'], [blue.slice(), ['E:rapidVaccineDeployment', 'E:remoteTreatment']]);
   s.cubes['Paris'].blue = 3; s.cubes['London'].blue = 2; s.cubes['Lima'].blue = 1; s.supply.blue -= 6;
   s = E.apply(s, 0, { type: 'cure', color: 'blue', cards: blue });
@@ -207,7 +235,7 @@ test('events: forecast, grant, travel ban, borrowed time, RVD, remote treatment'
 
 test('6 stations max', () => {
   let s = fresh(['opsExpert', 'medic']);
-  s.stations = ['Atlanta', 'Paris', 'Tokyo', 'Lima', 'Cairo', 'Sydney'];
+  s.stations = ['Austin', 'Paris', 'Tokyo', 'Lima', 'Cairo', 'Sydney'];
   s.players[0].location = 'Chicago';
   expectFail(() => E.apply(s, 0, { type: 'build' }), /pick one/);
   s = E.apply(s, 0, { type: 'build', remove: 'Sydney' });
