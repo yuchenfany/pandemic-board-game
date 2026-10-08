@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pandemic: On the Brink — Online</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%227%22 fill=%22%23d8433b%22/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Home -->
+  <section id="home" class="screen hidden">
+    <div class="home-card">
+      <h1>PANDEMIC <span>On the Brink</span></h1>
+      <p class="sub">Cooperative multiplayer for 2–5 players. Create a room and share the link with your team.</p>
+      <label>Your name <input id="nameInput" maxlength="20" placeholder="e.g. Alex"></label>
+      <button id="createBtn" class="primary">Create a new room</button>
+      <div class="or">or join an existing room</div>
+      <div class="row">
+        <input id="codeInput" maxlength="4" placeholder="CODE" class="code-input">
+        <button id="joinBtn">Join</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Lobby -->
+  <section id="lobby" class="screen hidden"></section>
+
+  <!-- Game -->
+  <section id="game" class="screen hidden">
+    <header id="topbar"></header>
+    <main>
+      <div id="mapwrap">
+        <svg id="map"></svg>
+        <div id="banner"></div>
+      </div>
+      <aside id="side">
+        <div id="players"></div>
+        <div id="logchat">
+          <div class="tabs">
+            <button data-tab="log" class="active">Game log</button>
+            <button data-tab="chat">Chat <span id="chatBadge"></span></button>
+          </div>
+          <div id="logView" class="scroll"></div>
+          <div id="chatView" class="hidden">
+            <div id="chatMsgs" class="scroll"></div>
+            <form id="chatForm"><input id="chatInput" maxlength="300" placeholder="Message your team…" autocomplete="off"></form>
+          </div>
+        </div>
+      </aside>
+    </main>
+    <footer id="actionbar"></footer>
+  </section>
+
+  <div id="modal" class="hidden">
+    <div class="modal-box">
+      <h3 id="modalTitle"></h3>
+      <div id="modalBody"></div>
+      <div id="modalButtons"></div>
+    </div>
+  </div>
+  <div id="toast"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/shared/data.js"></script>
+  <script src="/shared/engine.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

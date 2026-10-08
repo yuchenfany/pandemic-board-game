@@ -1,0 +1,15 @@
+{
+  "name": "pandemic-on-the-brink-online",
+  "version": "1.0.0",
+  "description": "Multiplayer web version of Pandemic with the On the Brink roles & events",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/rules.js && node test/sim.js"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
