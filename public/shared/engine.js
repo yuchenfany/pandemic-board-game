@@ -1,27 +1,40 @@
-// Pandemic rules engine (base game + On the Brink roles & events).
-// Pure state-in / state-out; runs on the server (authoritative) and in the browser (move hints).
+// Pandemic rules engine (base game + On the Brink roles, events, Virulent Strain and Mutation challenges).
+// Pure state-in / state-out; runs in the host's browser (authoritative) and in every browser (move hints).
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory(require('./data.js'));
   else root.Engine = factory(root.PData);
 }(typeof self !== 'undefined' ? self : this, function (D) {
   'use strict';
-  const { CITIES, ADJ, COLORS, ROLES, EVENTS } = D;
+  const { CITIES, ADJ, COLORS, ROLES, EVENTS, VIRULENT, MUTATION_EVENTS } = D;
   const CITY_NAMES = Object.keys(CITIES);
   const RATES = [2, 2, 2, 3, 3, 4, 4];
   const HAND_SIZE = { 2: 4, 3: 3, 4: 2, 5: 2 };
   const MAX_OUTBREAKS = 8;
   const CUBES_PER_COLOR = 24;
+  const PURPLE_CUBES = 12;
   const MAX_STATIONS = 6;
   const FORECAST_COUNT = 6;
 
   class GameError extends Error {}
   const fail = (msg) => { throw new GameError(msg); };
 
+  // Card ids: city name | 'E:<event>' | 'EPIDEMIC<n>' | 'EPIDEMIC-VS:<effect>' | 'ME:<mutation event>' (player deck)
+  //           city name | 'MUTATION<n>' (infection deck)
   const isCity = (c) => typeof c === 'string' && !!CITIES[c];
   const isEvent = (c) => typeof c === 'string' && c.startsWith('E:');
   const isEpidemic = (c) => typeof c === 'string' && c.startsWith('EPIDEMIC');
+  const isMutationEvent = (c) => typeof c === 'string' && c.startsWith('ME:');
+  const isMutationCard = (c) => typeof c === 'string' && c.startsWith('MUTATION');
+  const vsKeyOf = (c) => (typeof c === 'string' && c.startsWith('EPIDEMIC-VS:') ? c.slice(12) : null);
   const eventKey = (c) => c.slice(2);
-  const cardName = (c) => isEvent(c) ? EVENTS[eventKey(c)].name : isEpidemic(c) ? 'Epidemic' : c;
+  function cardName(c) {
+    if (isEvent(c)) return EVENTS[eventKey(c)].name;
+    if (isMutationEvent(c)) return MUTATION_EVENTS[c.slice(3)].name;
+    if (isMutationCard(c)) return 'Mutation';
+    if (vsKeyOf(c)) return `Epidemic: ${VIRULENT[vsKeyOf(c)].name}`;
+    if (isEpidemic(c)) return 'Epidemic';
+    return c;
+  }
 
   function shuffle(arr) {
     const a = arr.slice();
@@ -43,14 +56,17 @@
     s.log.push({ turn: s.turnNo, msg });
     if (s.log.length > 400) s.log.splice(0, s.log.length - 400);
   }
-  const pname = (s, i) => `${s.players[i].name} (${ROLES[s.players[i].role].name})`;
+
+  const zeroCubes = (colors) => Object.fromEntries(colors.map(c => [c, 0]));
+  const vsOn = (s, key) => !!s.virulent && (s.vsEffects || []).includes(key);
 
   // ---------------------------------------------------------------- setup
 
-  function createGame({ players, epidemics = 5, eventCount }) {
+  function createGame({ players, epidemics = 5, eventCount, challenges = {} }) {
     const n = players.length;
     if (n < 2 || n > 5) fail('Pandemic needs 2 to 5 players');
     if (epidemics < 4 || epidemics > 7) fail('Epidemics must be 4-7');
+    const mutation = !!challenges.mutation, virulent = !!challenges.virulent;
 
     const roleKeys = Object.keys(ROLES);
     const chosen = players.map(p => p.role).filter(Boolean);
@@ -58,12 +74,16 @@
     chosen.forEach(r => { if (!ROLES[r]) fail(`Unknown role ${r}`); });
     const freeRoles = shuffle(roleKeys.filter(r => !chosen.includes(r)));
 
+    const colors = mutation ? [...COLORS, 'purple'] : COLORS.slice();
     const s = {
+      challenges: { mutation, virulent },
+      colors,
       players: [],
-      cubes: Object.fromEntries(CITY_NAMES.map(c => [c, { blue: 0, yellow: 0, black: 0, red: 0 }])),
-      supply: Object.fromEntries(COLORS.map(c => [c, CUBES_PER_COLOR])),
+      cubes: Object.fromEntries(CITY_NAMES.map(c => [c, zeroCubes(colors)])),
+      supply: Object.fromEntries(colors.map(c => [c, c === 'purple' ? PURPLE_CUBES : CUBES_PER_COLOR])),
+      boxed: zeroCubes(colors), // cubes removed from the game (Unacceptable Loss)
       stations: ['Austin'],
-      cures: Object.fromEntries(COLORS.map(c => [c, 'none'])), // none | cured | eradicated
+      cures: Object.fromEntries(colors.map(c => [c, 'none'])), // none | cured | eradicated
       rateIdx: 0,
       outbreaks: 0,
       epidemics,
@@ -72,12 +92,15 @@
       infectionDeck: shuffle(CITY_NAMES), // top = end, bottom = index 0
       infectionDiscard: [],
       removed: [],
+      virulent: null, // Virulent Strain color once determined
+      vsEffects: [], // continuing Virulent Strain effects in play
+      vsPlayed: [], // every Virulent Strain epidemic drawn so far
       current: 0,
       turnNo: 1,
       turn: null,
       interrupt: null,
       quietNight: false,
-      travelBan: null, // index of the player who played Commercial Travel Ban
+      travelBan: null, // Commercial Travel Ban lasts until this player's next turn begins
       rvdColor: null, // Rapid Vaccine Deployment window after a cure
       status: 'playing',
       result: null,
@@ -92,6 +115,7 @@
       s.infectionDiscard.push(card);
       log(s, `${card} infected with ${count} ${CITIES[card].color} cube${count > 1 ? 's' : ''}.`);
     }
+    if (mutation) s.infectionDiscard.push('MUTATION1', 'MUTATION2');
 
     s.players = players.map(p => ({
       name: p.name,
@@ -99,7 +123,7 @@
       location: 'Austin',
       hand: [],
       stored: null, // Contingency Planner
-      samples: { blue: 0, yellow: 0, black: 0, red: 0 }, // Field Operative
+      samples: zeroCubes(colors), // Field Operative
     }));
 
     const allEvents = Object.keys(EVENTS);
@@ -109,19 +133,25 @@
 
     const handSize = HAND_SIZE[n];
     s.players.forEach(p => { for (let i = 0; i < handSize; i++) p.hand.push(deck.pop()); });
+    if (mutation) deck = shuffle(deck.concat(Object.keys(MUTATION_EVENTS).map(k => 'ME:' + k)));
 
+    const epidemicCards = virulent
+      ? shuffle(Object.keys(VIRULENT)).slice(0, epidemics).map(k => 'EPIDEMIC-VS:' + k)
+      : Array.from({ length: epidemics }, (_, i) => 'EPIDEMIC' + (i + 1));
     // Split into piles (larger piles on top), shuffle an epidemic into each, stack them.
     const piles = [];
     const base = Math.floor(deck.length / epidemics), extra = deck.length % epidemics;
     let pos = 0;
     for (let i = 0; i < epidemics; i++) {
       const size = base + (i < extra ? 1 : 0);
-      piles.push(shuffle(deck.slice(pos, pos + size).concat(['EPIDEMIC' + (i + 1)])));
+      piles.push(shuffle(deck.slice(pos, pos + size).concat([epidemicCards[i]])));
       pos += size;
     }
     for (let i = piles.length - 1; i >= 0; i--) s.playerDeck.push(...piles[i]);
 
-    s.players.forEach((p, i) => log(s, `${p.name} is the ${ROLES[p.role].name}.`));
+    if (virulent) log(s, 'Challenge: Virulent Strain.');
+    if (mutation) log(s, 'Challenge: Mutation (purple disease, 12 cubes).');
+    s.players.forEach(p => log(s, `${p.name} is the ${ROLES[p.role].name}.`));
     const first = Math.floor(Math.random() * n);
     log(s, `${s.players[first].name} goes first.`);
     startTurn(s, first);
@@ -138,7 +168,7 @@
       phase: 'actions', // actions | draw | epidemic | infect | over
       actionsLeft: s.players[idx].role === 'generalist' ? 5 : 4,
       actionsTaken: 0,
-      drawsLeft: 0,
+      pending: [], // drawn player cards still to resolve
       flags: {},
     };
     // Snapshot for "Restart turn" (everything except the snapshot itself).
@@ -159,11 +189,17 @@
     s.turn.phase = 'over';
     log(s, `GAME OVER: ${reason}`);
   }
-  function win(s) {
+  // Win when the 4 standard diseases are cured and purple (if in play) is cured or off the board.
+  function checkWin(s) {
+    if (s.status !== 'playing') return;
+    if (!COLORS.every(c => s.cures[c] !== 'none')) return;
+    if (s.colors.includes('purple') && s.cures.purple === 'none' && boardCount(s, 'purple') > 0) return;
     s.status = 'won';
-    s.result = 'All four cures discovered!';
+    s.result = s.colors.includes('purple')
+      ? (s.cures.purple !== 'none' ? 'All five diseases cured!' : 'All four cures discovered and no purple disease left!')
+      : 'All four cures discovered!';
     s.turn.phase = 'over';
-    log(s, 'VICTORY! All four cures have been discovered.');
+    log(s, `VICTORY! ${s.result}`);
   }
 
   function removeCubes(s, city, color, n) {
@@ -174,7 +210,7 @@
   }
 
   function checkEradication(s) {
-    COLORS.forEach(color => {
+    s.colors.forEach(color => {
       if (s.cures[color] === 'cured' && boardCount(s, color) === 0) {
         s.cures[color] = 'eradicated';
         log(s, `The ${color} disease has been ERADICATED!`);
@@ -207,8 +243,10 @@
   function outbreak(s, city, color, chain) {
     if (chain.has(city)) return;
     chain.add(city);
-    s.outbreaks++;
-    log(s, `OUTBREAK in ${city} (${color})! Outbreaks: ${s.outbreaks}/${MAX_OUTBREAKS}.`);
+    const step = (color === s.virulent && vsOn(s, 'slipperySlope')) ? 2 : 1;
+    s.outbreaks += step;
+    log(s, `OUTBREAK in ${city} (${color})! Outbreaks: ${Math.min(s.outbreaks, MAX_OUTBREAKS)}/${MAX_OUTBREAKS}.` +
+      (step === 2 ? ' (Slippery Slope: +2)' : ''));
     if (s.outbreaks >= MAX_OUTBREAKS) { lose(s, `${MAX_OUTBREAKS} outbreaks occurred.`); return; }
     for (const nb of ADJ[city]) {
       placeCubes(s, nb, color, 1, chain);
@@ -216,18 +254,23 @@
     }
   }
 
-  function infectCity(s, card, n) {
-    const color = CITIES[card].color;
-    if (s.cures[color] === 'eradicated') log(s, `${card} drawn — ${color} is eradicated, no cubes placed.`);
-    else log(s, `Infect ${card} (${n} ${color}).`);
-    placeCubes(s, card, color, n, new Set());
+  function infectCity(s, city, n, color = CITIES[city].color, note = '') {
+    if (s.cures[color] === 'eradicated') log(s, `${city} drawn — ${color} is eradicated, no cubes placed.`);
+    else log(s, `Infect ${city} (${n} ${color})${note}.`);
+    placeCubes(s, city, color, n, new Set());
   }
 
-  function onEnter(s, idx) {
+  // Bottom card of the infection deck that is a city (a Mutation card found there is just discarded).
+  function drawBottomCity(s) {
+    while (s.infectionDeck.length && !isCity(s.infectionDeck[0])) s.infectionDiscard.push(s.infectionDeck.shift());
+    return s.infectionDeck.shift() || null;
+  }
+
+  function onEnter(s, idx, method) {
     const p = s.players[idx];
     const city = p.location;
     if (p.role === 'medic') {
-      COLORS.forEach(c => {
+      s.colors.forEach(c => {
         if (s.cures[c] !== 'none' && s.cubes[city][c] > 0) {
           const k = removeCubes(s, city, c, 3);
           log(s, `Medic removed ${k} ${c} cube(s) in ${city}.`);
@@ -235,26 +278,43 @@
       });
     }
     if (p.role === 'containmentSpecialist') {
-      COLORS.forEach(c => {
+      s.colors.forEach(c => {
         if (s.cubes[city][c] >= 2) {
           removeCubes(s, city, c, 1);
           log(s, `Containment Specialist removed 1 ${c} cube in ${city}.`);
         }
       });
     }
-    if (s.turn && s.turn.flags.mobileHospital && idx === s.current) {
-      const best = COLORS.filter(c => s.cubes[city][c] > 0).sort((a, b) => s.cubes[city][b] - s.cubes[city][a])[0];
+    // Mobile Hospital: only when the current player drives/ferries into a city.
+    if (s.turn && s.turn.flags.mobileHospital && idx === s.current && method === 'drive') {
+      const best = s.colors.filter(c => s.cubes[city][c] > 0).sort((a, b) => s.cubes[city][b] - s.cubes[city][a])[0];
       if (best) {
         removeCubes(s, city, best, 1);
+        if (best === s.virulent) markVsTreated(s, city);
         log(s, `Mobile Hospital removed 1 ${best} cube in ${city}.`);
       }
     }
     checkEradication(s);
   }
 
-  function movePawn(s, idx, to) {
+  function markVsTreated(s, city) {
+    s.turn.flags.vsTreated = s.turn.flags.vsTreated || [];
+    if (!s.turn.flags.vsTreated.includes(city)) s.turn.flags.vsTreated.push(city);
+  }
+
+  // Government Interference: a pawn can't leave a city with Virulent Strain cubes until one was treated there this turn.
+  function leaveBlocked(s, pawnIdx) {
+    if (!vsOn(s, 'governmentInterference')) return null;
+    const from = s.players[pawnIdx].location;
+    if (s.cubes[from][s.virulent] > 0 && !((s.turn.flags.vsTreated || []).includes(from))) {
+      return `Government Interference: treat at least 1 ${s.virulent} cube in ${from} before leaving`;
+    }
+    return null;
+  }
+
+  function movePawn(s, idx, to, method) {
     s.players[idx].location = to;
-    onEnter(s, idx);
+    onEnter(s, idx, method);
   }
 
   function discardFromHand(s, p, card) {
@@ -274,9 +334,11 @@
     const dispatcher = actor.role === 'dispatcher';
     const special = s.turn.flags.specialOrders === pawnIdx;
     if (!own && !dispatcher && !special) return res;
+    if (leaveBlocked(s, pawnIdx)) return res;
     const has = (c) => actor.hand.includes(c);
 
-    if (ADJ[from].includes(to)) res.push({ method: 'drive', label: 'Drive / Ferry' });
+    // A neighbouring city is always reached by Drive/Ferry: it's free, so flights there would only waste a card.
+    if (ADJ[from].includes(to)) return [{ method: 'drive', label: 'Drive / Ferry' }];
     if (has(to)) res.push({ method: 'direct', card: to, label: `Direct Flight (discard ${to})` });
     if (has(from)) res.push({ method: 'charter', card: from, label: `Charter Flight (discard ${from})` });
     if (s.stations.includes(from) && s.stations.includes(to)) res.push({ method: 'shuttle', label: 'Shuttle Flight' });
@@ -309,10 +371,17 @@
     return res;
   }
 
-  function cardsNeededForCure(p, useSamples) {
+  // City cards needed to cure `color` (Scientist 4; Field Operative may swap 2 cards for 3 samples;
+  // Complex Molecular Structure adds 1 for an uncured Virulent Strain).
+  function cardsNeededForCure(s, p, color, useSamples) {
     let n = p.role === 'scientist' ? 4 : 5;
+    if (color && color === s.virulent && vsOn(s, 'complexMolecularStructure') && s.cures[color] === 'none') n++;
     if (useSamples) n -= 2;
     return n;
+  }
+  // Hand cards that can count toward curing `color`.
+  function cureCards(s, p, color) {
+    return p.hand.filter(c => isCity(c) && (color === 'purple' || CITIES[c].color === color));
   }
 
   // ---------------------------------------------------------------- turn flow
@@ -331,22 +400,95 @@
   const canRestart = (s) => !!s.turnStart && s.status === 'playing' && s.turn.phase === 'actions' &&
     !s.interrupt && !s.turn.flags.revealed;
 
+  function determineVirulent(s) {
+    const counts = COLORS.map(c => [c, boardCount(s, c)]);
+    const max = Math.max(...counts.map(([, n]) => n));
+    const tied = counts.filter(([, n]) => n === max).map(([c]) => c);
+    s.virulent = tied[Math.floor(Math.random() * tied.length)];
+    log(s, `The VIRULENT STRAIN is ${s.virulent}${tied.length > 1 ? ' (chosen at random among the tied diseases)' : ''}!`);
+  }
+
+  function applyVirulentEffect(s, key) {
+    const v = s.virulent, eff = VIRULENT[key];
+    s.vsPlayed.push(key);
+    if (eff.continuing) {
+      s.vsEffects.push(key);
+      log(s, `Virulent Strain effect — ${eff.name}: ${eff.text}`);
+      return;
+    }
+    log(s, `Virulent Strain effect — ${eff.name}.`);
+    if (key === 'hiddenPocket') {
+      const cities = s.infectionDiscard.filter(c => isCity(c) && CITIES[c].color === v);
+      if (s.cures[v] === 'eradicated' && cities.length) {
+        s.cures[v] = 'cured';
+        log(s, `Hidden Pocket: ${v} is no longer eradicated!`);
+        cities.forEach(c => { infectCity(s, c, 1, v, ' — Hidden Pocket'); });
+      } else {
+        log(s, 'Hidden Pocket has no effect.');
+      }
+    } else if (key === 'unacceptableLoss') {
+      const k = Math.min(4, s.supply[v]);
+      s.supply[v] -= k;
+      s.boxed[v] += k;
+      log(s, `Unacceptable Loss: ${k} ${v} cube(s) removed from the game.`);
+    } else if (key === 'uncountedPopulations') {
+      const cities = CITY_NAMES.filter(c => s.cubes[c][v] === 1);
+      cities.forEach(c => { if (s.status === 'playing') infectCity(s, c, 1, v, ' — Uncounted Populations'); });
+      if (!cities.length) log(s, 'Uncounted Populations has no effect.');
+    }
+  }
+
+  function resolveEpidemic(s, card, p) {
+    s.removed.push(card);
+    s.rateIdx = Math.min(s.rateIdx + 1, RATES.length - 1);
+    log(s, `${p.name} drew an EPIDEMIC! Infection rate is now ${RATES[s.rateIdx]}.`);
+    const bottom = drawBottomCity(s);
+    if (bottom) {
+      infectCity(s, bottom, 3);
+      s.infectionDiscard.push(bottom);
+    }
+    if (s.status !== 'playing') return;
+    const key = vsKeyOf(card);
+    if (key) {
+      if (!s.virulent) determineVirulent(s);
+      applyVirulentEffect(s, key);
+    }
+  }
+
+  function resolveMutationEvent(s, card, p) {
+    const key = card.slice(3);
+    s.playerDiscard.push(card);
+    log(s, `${p.name} drew ${MUTATION_EVENTS[key].name}`);
+    const active = s.cures.purple !== 'eradicated';
+    if (key === 'threatens' && active) {
+      const c = drawBottomCity(s);
+      if (c) { infectCity(s, c, 3, 'purple', ' — Mutation'); s.infectionDiscard.push(c); }
+    } else if (key === 'spreads' && active) {
+      for (let i = 0; i < 3 && s.status === 'playing'; i++) {
+        const c = drawBottomCity(s);
+        if (c) { infectCity(s, c, 1, 'purple', ' — Mutation'); s.infectionDiscard.push(c); }
+      }
+    } else if (key === 'intensifies') {
+      CITY_NAMES.filter(c => s.cubes[c].purple === 2).forEach(c => { if (s.status === 'playing') infectCity(s, c, 1, 'purple', ' — Mutation'); });
+    } else {
+      log(s, 'Purple is eradicated — no effect.');
+    }
+  }
+
   function continueDrawing(s) {
     const p = s.players[s.current];
-    while (s.turn.drawsLeft > 0) {
-      if (s.playerDeck.length === 0) { lose(s, 'The player deck ran out.'); return; }
-      const card = s.playerDeck.pop();
-      s.turn.drawsLeft--;
+    while (s.turn.pending.length) {
+      const card = s.turn.pending.shift();
       if (isEpidemic(card)) {
-        s.removed.push(card);
-        s.rateIdx = Math.min(s.rateIdx + 1, RATES.length - 1);
-        const bottom = s.infectionDeck.shift();
-        log(s, `${p.name} drew an EPIDEMIC! Infection rate is now ${RATES[s.rateIdx]}.`);
-        infectCity(s, bottom, 3);
-        s.infectionDiscard.push(bottom);
+        resolveEpidemic(s, card, p);
         if (s.status !== 'playing') return;
         s.turn.phase = 'epidemic'; // pause so Resilient Population can be played before Intensify
         return;
+      }
+      if (isMutationEvent(card)) {
+        resolveMutationEvent(s, card, p);
+        if (s.status !== 'playing') return;
+        continue;
       }
       p.hand.push(card);
       log(s, `${p.name} drew ${cardName(card)}.`);
@@ -359,12 +501,32 @@
       s.quietNight = false;
       log(s, 'One Quiet Night — the Infect Cities step is skipped.');
     } else {
-      const n = s.travelBan !== null ? 1 : RATES[s.rateIdx];
-      if (s.travelBan !== null) log(s, 'Commercial Travel Ban — only 1 infection card is drawn.');
+      let n = s.travelBan !== null ? 1 : RATES[s.rateIdx];
+      if (s.travelBan !== null) log(s, 'Commercial Travel Ban — the infection rate is 1.');
+      let rateBonus = false;
       for (let i = 0; i < n && s.infectionDeck.length; i++) {
         const card = s.infectionDeck.pop();
-        infectCity(s, card, 1);
-        s.infectionDiscard.push(card);
+        if (isMutationCard(card)) {
+          log(s, 'A Mutation card was drawn.');
+          if (s.cures.purple !== 'eradicated') {
+            const c = drawBottomCity(s);
+            if (c) { infectCity(s, c, 1, 'purple', ' — Mutation'); s.infectionDiscard.push(c); }
+          }
+          s.infectionDiscard.push(card);
+        } else {
+          const color = CITIES[card].color;
+          if (s.colors.includes('purple') && s.cubes[card].purple > 0 && s.cures.purple !== 'eradicated') {
+            infectCity(s, card, 1, 'purple', ' — Mutation');
+          }
+          const chronic = color === s.virulent && vsOn(s, 'chronicEffect') && s.cubes[card][color] === 0;
+          if (s.status === 'playing') infectCity(s, card, chronic ? 2 : 1, color, chronic ? ' — Chronic Effect' : '');
+          s.infectionDiscard.push(card);
+          if (!rateBonus && color === s.virulent && vsOn(s, 'rateEffect')) {
+            rateBonus = true;
+            n++;
+            log(s, 'Rate Effect: drawing 1 more infection card.');
+          }
+        }
         if (s.status !== 'playing') return;
       }
     }
@@ -405,7 +567,9 @@
       case 'airlift': {
         const i = validPawn(s, prm.pawn), to = validCity(prm.to);
         if (s.players[i].location === to) fail('That pawn is already there');
-        movePawn(s, i, to);
+        const blocked = leaveBlocked(s, i);
+        if (blocked) fail(blocked);
+        movePawn(s, i, to, 'airlift');
         log(s, `${s.players[i].name} airlifted to ${to}.`);
         break;
       }
@@ -429,21 +593,21 @@
         s.quietNight = true;
         break;
       case 'resilientPopulation': {
+        if (!isCity(prm.card)) fail('Pick a City card (Mutation cards cannot be removed)');
         if (!removeOne(s.infectionDiscard, prm.card)) fail('Pick a card from the Infection Discard pile');
         s.removed.push(prm.card);
         log(s, `${prm.card} removed from the infection deck for the rest of the game.`);
         break;
       }
       case 'borrowedTime':
-        if (!inActions) fail('Borrowed Time can only be played during the actions phase');
+        if (!inActions) fail('Borrowed Time can only be played while the current player is taking actions');
         s.turn.actionsLeft += 2;
         break;
       case 'commercialTravelBan':
-        if (pid !== s.current || !inActions || s.turn.actionsTaken > 0) fail('Play Commercial Travel Ban at the start of your turn');
-        s.travelBan = pid;
+        s.travelBan = s.current;
+        log(s, `The infection rate is 1 until ${s.players[s.current].name}'s next turn begins.`);
         break;
       case 'mobileHospital':
-        if (!inActions) fail('Mobile Hospital can only be played during the actions phase');
         s.turn.flags.mobileHospital = true;
         break;
       case 'newAssignment': {
@@ -452,16 +616,12 @@
         if (!ROLES[role] || s.players.some(q => q.role === role)) fail('Pick an unused role');
         const q = s.players[i];
         if (q.stored) { s.removed.push(q.stored); q.stored = null; }
-        COLORS.forEach(c => { s.supply[c] += q.samples[c]; q.samples[c] = 0; });
+        s.colors.forEach(c => { s.supply[c] += q.samples[c]; q.samples[c] = 0; });
         log(s, `${q.name} changed from ${ROLES[q.role].name} to ${ROLES[role].name}.`);
+        const wasGeneralist = q.role === 'generalist';
         q.role = role;
-        if (i === s.current && inActions) {
-          // Keep remaining actions consistent with the new role's action count.
-          const max = role === 'generalist' ? 5 : 4;
-          const prevMax = s.turn.actionsLeft + s.turn.actionsTaken;
-          if (prevMax === 5 && max === 4) s.turn.actionsLeft = Math.max(0, s.turn.actionsLeft - 1);
-          if (prevMax === 4 && max === 5) s.turn.actionsLeft++;
-        }
+        // Swapping to (or from) the Generalist lets the current player do up to 5 actions this turn.
+        if (i === s.current && inActions && role === 'generalist' && !wasGeneralist) s.turn.actionsLeft++;
         onEnter(s, i);
         break;
       }
@@ -475,7 +635,6 @@
         const cities = list.map(r => validCity(r.city));
         if (new Set(cities).size !== cities.length) fail('Each city once');
         list.forEach(r => { if (!Number.isInteger(r.n) || s.cubes[r.city][color] < r.n) fail(`Not enough cubes in ${r.city}`); });
-        // Connected group check
         const seen = new Set([cities[0]]), stack = [cities[0]];
         while (stack.length) {
           const c = stack.pop();
@@ -500,7 +659,7 @@
         if (!list.length || list.length > 2) fail('Choose 1 or 2 cubes');
         list.forEach(r => {
           validCity(r.city);
-          if (!COLORS.includes(r.color) || s.cubes[r.city][r.color] < 1) fail(`No ${r.color} cube in ${r.city}`);
+          if (!s.colors.includes(r.color) || s.cubes[r.city][r.color] < 1) fail(`No ${r.color} cube in ${r.city}`);
           removeCubes(s, r.city, r.color, 1);
           log(s, `Removed 1 ${r.color} cube from ${r.city}.`);
         });
@@ -508,7 +667,7 @@
         break;
       }
       case 'specialOrders': {
-        if (!inActions) fail('Special Orders can only be played during the actions phase');
+        if (!inActions) fail('Special Orders can only be played while the current player is taking actions');
         const i = validPawn(s, prm.pawn);
         if (i === s.current) fail("Pick another player's pawn");
         s.turn.flags.specialOrders = i;
@@ -525,6 +684,7 @@
   function apply(state, pid, action) {
     const s = JSON.parse(JSON.stringify(state));
     doApply(s, pid, action || {});
+    checkWin(s);
     return s;
   }
 
@@ -549,6 +709,9 @@
       case 'move': {
         requireActionTurn(s, pid);
         const pawn = Number.isInteger(a.pawn) ? a.pawn : pid;
+        if (!s.players[pawn]) fail('Pick a valid pawn');
+        const blocked = leaveBlocked(s, pawn);
+        if (blocked) fail(blocked);
         const opt = getMoveOptions(s, pid, pawn, a.to).find(o => o.method === a.method);
         if (!opt) fail('That move is not allowed');
         const from = s.players[pawn].location;
@@ -558,7 +721,7 @@
           discardFromHand(s, p, a.card);
           s.turn.flags.opsMove = true;
         }
-        movePawn(s, pawn, a.to);
+        movePawn(s, pawn, a.to, opt.method);
         log(s, `${s.players[pawn].name} moved ${from} → ${a.to} (${opt.label}${opt.method === 'ops' ? `, discarded ${a.card}` : ''}).`);
         spendAction(s);
         break;
@@ -578,9 +741,10 @@
       case 'treat': {
         requireActionTurn(s, pid);
         const color = a.color;
-        if (!COLORS.includes(color) || s.cubes[here][color] < 1) fail(`No ${color} cubes here`);
+        if (!s.colors.includes(color) || s.cubes[here][color] < 1) fail(`No ${color} cubes here`);
         const all = p.role === 'medic' || s.cures[color] !== 'none';
         const k = removeCubes(s, here, color, all ? 3 : 1);
+        if (color === s.virulent) markVsTreated(s, here);
         log(s, `${p.name} treated ${k} ${color} cube(s) in ${here}.`);
         checkEradication(s);
         spendAction(s);
@@ -601,15 +765,20 @@
       case 'cure': {
         requireActionTurn(s, pid);
         const color = a.color;
-        if (!COLORS.includes(color)) fail('Pick a color');
+        if (!s.colors.includes(color)) fail('Pick a color');
         if (!s.stations.includes(here)) fail('You must be at a research station');
         if (s.cures[color] !== 'none') fail('That disease is already cured');
         const useSamples = !!a.useSamples;
         if (useSamples && (p.role !== 'fieldOperative' || p.samples[color] < 3)) fail('You need 3 samples of that color');
         const cards = Array.isArray(a.cards) ? a.cards : [];
-        const need = cardsNeededForCure(p, useSamples);
-        if (new Set(cards).size !== cards.length || cards.length !== need) fail(`Select exactly ${need} ${color} City cards`);
-        cards.forEach(c => { if (!isCity(c) || CITIES[c].color !== color || !p.hand.includes(c)) fail(`Invalid card ${c}`); });
+        const need = cardsNeededForCure(s, p, color, useSamples);
+        const what = color === 'purple' ? 'City cards (any colors)' : `${color} City cards`;
+        if (new Set(cards).size !== cards.length || cards.length !== need) fail(`Select exactly ${need} ${what}`);
+        const allowed = cureCards(s, p, color);
+        cards.forEach(c => { if (!allowed.includes(c)) fail(`Invalid card ${c}`); });
+        if (color === 'purple' && !cards.some(c => s.cubes[c].purple > 0)) {
+          fail('At least 1 of the cards must be a city that has purple cubes');
+        }
         cards.forEach(c => discardFromHand(s, p, c));
         if (useSamples) { p.samples[color] -= 3; s.supply[color] += 3; }
         s.cures[color] = 'cured';
@@ -617,8 +786,8 @@
         s.players.forEach((q, qi) => { if (q.role === 'medic') onEnter(s, qi); });
         checkEradication(s);
         spendAction(s);
-        if (COLORS.every(c => s.cures[c] !== 'none')) { win(s); break; }
-        s.rvdColor = color;
+        checkWin(s);
+        if (s.status === 'playing') s.rvdColor = color;
         break;
       }
       case 'contingencyTake': {
@@ -646,7 +815,7 @@
         requireActionTurn(s, pid);
         if (p.role !== 'fieldOperative') fail('Only the Field Operative can do that');
         if (s.turn.flags.sample) fail('Already took a sample this turn');
-        if (!COLORS.includes(a.color) || s.cubes[here][a.color] < 1) fail('No cube of that color here');
+        if (!s.colors.includes(a.color) || s.cubes[here][a.color] < 1) fail('No cube of that color here');
         s.cubes[here][a.color]--;
         p.samples[a.color]++;
         s.turn.flags.sample = true;
@@ -676,7 +845,7 @@
         if (pid !== s.current) fail("It's not your turn");
         if (!canRestart(s)) fail(s.turn.flags.revealed ? 'Cannot restart after hidden cards were revealed (Forecast)' : 'Nothing to restart');
         const snap = s.turnStart;
-        const { log: _l, logCount } = s;
+        const { logCount } = s;
         Object.keys(s).forEach(k => delete s[k]);
         Object.assign(s, JSON.parse(JSON.stringify(snap)), { turnStart: snap, logCount });
         log(s, `${p.name} restarted their turn.`);
@@ -689,12 +858,16 @@
         s.turn.actionsLeft = 0;
         s.turn.phase = 'draw';
         break;
-      case 'draw':
+      case 'draw': {
         if (pid !== s.current || s.turn.phase !== 'draw') fail('Not time to draw');
         if (s.playerDeck.length < 2) { lose(s, 'Not enough player cards left to draw.'); break; }
-        s.turn.drawsLeft = 2;
+        const drawn = [s.playerDeck.pop(), s.playerDeck.pop()];
+        // A Mutation Event is resolved before an Epidemic drawn at the same time.
+        if (isEpidemic(drawn[0]) && isMutationEvent(drawn[1])) drawn.reverse();
+        s.turn.pending = drawn;
         continueDrawing(s);
         break;
+      }
       case 'continue':
         if (pid !== s.current || s.turn.phase !== 'epidemic') fail('Nothing to continue');
         s.infectionDeck.push(...shuffle(s.infectionDiscard));
@@ -751,7 +924,8 @@
   }
 
   return {
-    GameError, createGame, apply, view, getMoveOptions, getShareOptions, cardsNeededForCure,
-    isCity, isEvent, isEpidemic, eventKey, cardName, handLimit, RATES, MAX_STATIONS, MAX_OUTBREAKS,
+    GameError, createGame, apply, view, getMoveOptions, getShareOptions, cardsNeededForCure, cureCards, leaveBlocked,
+    isCity, isEvent, isEpidemic, isMutationEvent, isMutationCard, vsKeyOf, eventKey, cardName, handLimit,
+    RATES, MAX_STATIONS, MAX_OUTBREAKS,
   };
 }));

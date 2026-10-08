@@ -7,10 +7,10 @@ const pick = (a) => a[Math.floor(Math.random() * a.length)];
 const CITY_NAMES = Object.keys(D.CITIES);
 
 function checkInvariants(s) {
-  D.COLORS.forEach(c => {
+  s.colors.forEach(c => {
     const board = CITY_NAMES.reduce((t, city) => t + s.cubes[city][c], 0);
     const samples = s.players.reduce((t, p) => t + p.samples[c], 0);
-    assert.strictEqual(board + samples + s.supply[c], 24, `cube conservation ${c}`);
+    assert.strictEqual(board + samples + s.supply[c] + s.boxed[c], c === 'purple' ? 12 : 24, `cube conservation ${c}`);
     CITY_NAMES.forEach(city => assert(s.cubes[city][c] >= 0 && s.cubes[city][c] <= 3, `cube range ${city}`));
   });
   const cards = [...s.playerDeck, ...s.playerDiscard, ...s.removed.filter(c => !CITY_NAMES.includes(c)),
@@ -18,19 +18,20 @@ function checkInvariants(s) {
   assert.strictEqual(new Set(cards).size, cards.length, 'duplicate player card');
   const inf = [...s.infectionDeck, ...s.infectionDiscard, ...s.removed.filter(c => CITY_NAMES.includes(c)),
     ...(s.interrupt ? s.interrupt.cards : [])];
-  assert.strictEqual(inf.length, 48, 'infection card count');
-  assert.strictEqual(new Set(inf).size, 48, 'duplicate infection card');
+  const infTotal = s.challenges.mutation ? 50 : 48;
+  assert.strictEqual(inf.length, infTotal, 'infection card count');
+  assert.strictEqual(new Set(inf).size, infTotal, 'duplicate infection card');
   assert(s.stations.length <= 6);
 }
 
 function randomEventParams(s, key) {
   const pawn = Math.floor(Math.random() * s.players.length);
   const city = pick(CITY_NAMES);
-  const withCubes = CITY_NAMES.flatMap(c => D.COLORS.filter(col => s.cubes[c][col] > 0).map(col => ({ city: c, color: col })));
+  const withCubes = CITY_NAMES.flatMap(c => s.colors.filter(col => s.cubes[c][col] > 0).map(col => ({ city: c, color: col })));
   switch (key) {
     case 'airlift': return { pawn, to: city };
     case 'governmentGrant': return { city, remove: pick(s.stations) };
-    case 'resilientPopulation': return { card: pick(s.infectionDiscard) };
+    case 'resilientPopulation': return { card: pick(s.infectionDiscard.filter(E.isCity)) };
     case 'newAssignment': return { player: pawn, role: pick(Object.keys(D.ROLES).filter(r => !s.players.some(p => p.role === r))) };
     case 'rapidVaccineDeployment': {
       const c = withCubes.find(w => w.color === s.rvdColor);
@@ -67,10 +68,11 @@ function candidates(s) {
   if (ph !== 'actions') return out;
 
   // Prefer cure / treat to make games progress
-  D.COLORS.forEach(color => {
-    const cards = p.hand.filter(c => E.isCity(c) && D.CITIES[c].color === color);
+  s.colors.forEach(color => {
+    let cards = E.cureCards(s, p, color);
+    if (color === 'purple') cards = cards.sort((a, b) => s.cubes[b].purple - s.cubes[a].purple);
     [false, true].forEach(useSamples => {
-      const need = E.cardsNeededForCure(p, useSamples);
+      const need = E.cardsNeededForCure(s, p, color, useSamples);
       if (cards.length >= need) for (let k = 0; k < 5; k++) out.push([cur, { type: 'cure', color, cards: cards.slice(0, need), useSamples }]);
     });
     if (s.cubes[p.location][color] > 0) {
@@ -96,11 +98,12 @@ function candidates(s) {
   return out;
 }
 
-function playOne(nPlayers, epidemics) {
+function playOne(nPlayers, epidemics, challenges) {
   let s = E.createGame({
     players: Array.from({ length: nPlayers }, (_, i) => ({ name: 'P' + i })),
     epidemics,
     eventCount: 13,
+    challenges,
   });
   checkInvariants(s);
   let steps = 0;
@@ -109,8 +112,10 @@ function playOne(nPlayers, epidemics) {
     const cands = candidates(s);
     assert(cands.length, 'no candidate actions');
     let moved = false;
-    for (let tries = 0; tries < 60 && !moved; tries++) {
-      const [pid, a] = pick(cands);
+    // A few random picks, then every candidate in random order before giving up.
+    const order = [...Array.from({ length: 30 }, () => pick(cands)), ...cands.slice().sort(() => Math.random() - 0.5)];
+    for (const [pid, a] of order) {
+      if (moved) break;
       try {
         s = E.apply(s, pid, a);
         moved = true;
@@ -121,7 +126,10 @@ function playOne(nPlayers, epidemics) {
     if (!moved) {
       // fall back to any always-legal action
       const forced = cands.find(([, a]) => ['draw', 'continue', 'infect', 'endActions', 'discard', 'forecastOrder'].includes(a.type));
-      assert(forced, 'stuck: ' + JSON.stringify(s.turn) + ' ' + JSON.stringify(cands.slice(0, 3)));
+      if (!forced) {
+        const why = cands.slice(0, 4).map(([pid, a]) => { try { E.apply(s, pid, a); return 'ok'; } catch (e) { return a.type + ': ' + e.message; } });
+        assert.fail('stuck: ' + JSON.stringify(s.turn) + ' ' + JSON.stringify(why));
+      }
       s = E.apply(s, forced[0], forced[1]);
     }
     checkInvariants(s);
@@ -134,9 +142,12 @@ function playOne(nPlayers, epidemics) {
 
 const N = Number(process.argv[2] || 300);
 const tally = {};
+let vsSeen = 0;
 for (let i = 0; i < N; i++) {
-  const s = playOne(2 + (i % 4), 4 + (i % 4));
+  const challenges = { virulent: i % 3 !== 0, mutation: i % 2 === 0 };
+  const s = playOne(2 + (i % 4), 4 + (i % 4), challenges);
+  if (s.challenges.virulent && s.vsPlayed.length) vsSeen += 1;
   const key = s.status === 'won' ? 'won' : s.result;
   tally[key] = (tally[key] || 0) + 1;
 }
-console.log(`Played ${N} random games without errors:`, tally);
+console.log(`Played ${N} random games (with/without Virulent Strain and Mutation) without errors; ${vsSeen} reached a Virulent Strain epidemic:`, tally);

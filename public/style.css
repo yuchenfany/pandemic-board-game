@@ -112,7 +112,7 @@ a.link:hover { text-decoration: underline; }
 #map .city { cursor: pointer; }
 #map .city circle.dotc { stroke: rgba(0,0,0,.7); stroke-width: 1.5; transition: r .15s; }
 #map .city:hover circle.dotc { stroke: #fff; stroke-width: 2.5; }
-#map .city text { fill: #fff; font-size: 11px; font-weight: 500; text-anchor: middle; paint-order: stroke; stroke: rgba(0,0,0,.85); stroke-width: 3px; pointer-events: none; }
+#map .city text { fill: #fff; font-size: 13.5px; font-weight: 600; text-anchor: middle; paint-order: stroke; stroke: rgba(0,0,0,.9); stroke-width: 3.5px; pointer-events: none; letter-spacing: .1px; }
 #map .city .ring { fill: none; stroke: transparent; stroke-width: 2.5; }
 #map .city.reachable .ring { stroke: var(--accent); stroke-dasharray: 4 3; animation: dash 1.5s linear infinite; }
 #map .city.reachable .hit { fill: rgba(57,201,168,.12); }
@@ -296,3 +296,17 @@ a.link:hover { text-decoration: underline; }
   #map .cube-new, #map .cube-gone, #map .ripple, #map .shock, #map .shieldfx, .pcard.pcard-new { animation: none; }
   .flycard, #map .spark, #map .pawn { transition: none; }
 }
+
+/* ---------- Challenges ---------- */
+.chip.purple { color: #fff; }
+.vial.virulent { box-shadow: 0 0 10px 2px var(--vc); animation: vsglow 1.6s ease-in-out infinite; }
+@keyframes vsglow { 50% { box-shadow: 0 0 2px 0 var(--vc); } }
+.stat.vs .cube { width: 12px; height: 12px; }
+.flycard.mut { background: linear-gradient(150deg, #3b1260, #8e3fd0); color: #fff; text-align: center; }
+.flycard.mut .band { background: #d9a6ff; }
+.flycard.mut.land { opacity: 0; transition: opacity .8s; }
+#alert .box.mut { border-color: #a35ee0; box-shadow: 0 0 80px rgba(155,79,214,.5); }
+#alert .box.mut .big { color: #c58cff; }
+.check.challenge { margin: 4px 0; }
+.check.challenge.off { color: var(--muted); }
+#logView .lc { font-weight: 600; }

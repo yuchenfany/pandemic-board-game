@@ -22,10 +22,11 @@
       this.code = code;
       this.seats = [];
       this.hostToken = null;
-      this.config = { epidemics: 5, eventsPerPlayer: 2 };
+      this.config = { epidemics: 5, eventsPerPlayer: 2, challenges: { virulent: false, mutation: false } };
       this.game = null;
       this.chat = [];
       if (saved) Object.assign(this, saved, { code });
+      this.config.challenges = this.config.challenges || { virulent: false, mutation: false };
     }
 
     toJSON() {
@@ -101,6 +102,11 @@
       const ep = Number(cfg.epidemics), ev = Number(cfg.eventsPerPlayer);
       if ([4, 5, 6, 7].includes(ep)) this.config.epidemics = ep;
       if ([0, 1, 2, 3].includes(ev)) this.config.eventsPerPlayer = ev;
+      if (cfg.challenges && typeof cfg.challenges === 'object') {
+        ['virulent', 'mutation'].forEach(k => {
+          if (typeof cfg.challenges[k] === 'boolean') this.config.challenges[k] = cfg.challenges[k];
+        });
+      }
     }
 
     on_start(token) {
@@ -110,6 +116,7 @@
         players: this.seats.map(s => ({ name: s.name, role: s.role })),
         epidemics: this.config.epidemics,
         eventCount: this.config.eventsPerPlayer * this.seats.length,
+        challenges: this.config.challenges,
       });
     }
 

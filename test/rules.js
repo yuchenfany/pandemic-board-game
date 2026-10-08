@@ -10,9 +10,9 @@ function test(name, fn) {
 }
 
 // Fresh game with an empty board, chosen roles, player 0 to act.
-function fresh(roles, hands = []) {
-  const s = E.createGame({ players: roles.map((role, i) => ({ name: 'P' + i, role })), epidemics: 5, eventCount: 0 });
-  CITY_NAMES.forEach(c => D.COLORS.forEach(col => { s.supply[col] += s.cubes[c][col]; s.cubes[c][col] = 0; }));
+function fresh(roles, hands = [], challenges = {}) {
+  const s = E.createGame({ players: roles.map((role, i) => ({ name: 'P' + i, role })), epidemics: 5, eventCount: 0, challenges });
+  CITY_NAMES.forEach(c => s.colors.forEach(col => { s.supply[col] += s.cubes[c][col]; s.cubes[c][col] = 0; }));
   s.players.forEach((p, i) => { s.playerDiscard.push(...p.hand); p.hand = hands[i] || []; });
   s.playerDiscard = s.playerDiscard.filter(c => !s.players.some(p => p.hand.includes(c)));
   s.current = 0;
@@ -251,6 +251,140 @@ test('setup distribution', () => {
     assert.strictEqual(s.players[0].hand.length, { 2: 4, 3: 3, 4: 2, 5: 2 }[n]);
     assert.strictEqual(new Set(s.players.map(p => p.role)).size, n);
   }
+});
+
+// ---------------------------------------------------------------- Virulent Strain
+const put = (s, city, color, n) => { s.cubes[city][color] += n; s.supply[color] -= n; };
+
+test('virulent strain: chosen by most cubes, effects apply', () => {
+  let s = fresh(['scientist', 'medic'], [], { virulent: true });
+  assert(s.playerDeck.filter(E.isEpidemic).every(c => c.startsWith('EPIDEMIC-VS:')), 'VS epidemic cards used');
+  put(s, 'Tokyo', 'red', 2); put(s, 'Seoul', 'red', 2);
+  s.playerDeck.push('Lima', 'EPIDEMIC-VS:slipperySlope');
+  s.infectionDeck = s.infectionDeck.filter(c => c !== 'Lima'); s.infectionDeck.unshift('Lima'); // bottom: Lima (yellow, 3)
+  s = E.apply(s, 0, { type: 'endActions' });
+  s = E.apply(s, 0, { type: 'draw' });
+  assert.strictEqual(s.virulent, 'red', 'red has the most cubes (4 > 3)');
+  assert.deepStrictEqual(s.vsEffects, ['slipperySlope']);
+  s = E.apply(s, 0, { type: 'continue' });
+  // Slippery Slope: red outbreak counts 2
+  put(s, 'Osaka', 'red', 3);
+  s.infectionDeck.push('Osaka');
+  s.travelBan = 1;
+  s = E.apply(s, 0, { type: 'infect' });
+  assert.strictEqual(s.outbreaks, 2);
+});
+
+test('virulent strain: complex molecular structure, government interference, chronic, rate effect', () => {
+  const reds = ['Tokyo', 'Seoul', 'Beijing', 'Osaka', 'Taipei'];
+  let s = fresh(['scientist', 'medic'], [reds.slice()], { virulent: true });
+  s.virulent = 'red'; s.vsEffects = ['complexMolecularStructure', 'governmentInterference', 'chronicEffect', 'rateEffect'];
+  assert.strictEqual(E.cardsNeededForCure(s, s.players[0], 'red', false), 5, 'scientist needs 4+1');
+  expectFail(() => E.apply(s, 0, { type: 'cure', color: 'red', cards: reds.slice(0, 4) }), /exactly 5/);
+  // Government interference
+  put(s, 'Austin', 'red', 2);
+  expectFail(() => E.apply(s, 0, { type: 'move', to: 'Chicago', method: 'drive' }), /Government Interference/);
+  s = E.apply(s, 0, { type: 'treat', color: 'red' });
+  s = E.apply(s, 0, { type: 'move', to: 'Chicago', method: 'drive' });
+  // Chronic: red city with no red cubes gets 2; Rate Effect draws 1 extra
+  s = E.apply(s, 0, { type: 'endActions' });
+  s.playerDeck.push('Lima', 'Bogota');
+  s = E.apply(s, 0, { type: 'draw' });
+  s.infectionDeck = s.infectionDeck.filter(c => !['Manila', 'Cairo', 'Lagos', 'Paris'].includes(c));
+  s.infectionDeck.push('Paris', 'Lagos', 'Cairo', 'Manila'); // top: Manila (red), Cairo, then Lagos (the extra), Paris untouched
+  s = E.apply(s, 0, { type: 'infect' });
+  assert.strictEqual(s.cubes['Manila'].red, 2, 'chronic effect');
+  assert.strictEqual(s.cubes['Cairo'].black, 1);
+  assert.strictEqual(s.cubes['Lagos'].yellow, 1, 'rate effect extra card');
+  assert.strictEqual(s.cubes['Paris'].blue, 0);
+});
+
+test('virulent strain: immediate effects', () => {
+  let s = fresh(['scientist', 'medic'], [], { virulent: true });
+  s.virulent = 'blue';
+  put(s, 'Paris', 'blue', 1); put(s, 'Essen', 'blue', 1); put(s, 'Milan', 'blue', 2);
+  s.playerDeck.push('Lima', 'EPIDEMIC-VS:uncountedPopulations');
+  s.infectionDeck = s.infectionDeck.filter(c => c !== 'Sydney'); s.infectionDeck.unshift('Sydney');
+  s = E.apply(s, 0, { type: 'endActions' });
+  s = E.apply(s, 0, { type: 'draw' });
+  assert.strictEqual(s.cubes['Paris'].blue, 2); assert.strictEqual(s.cubes['Essen'].blue, 2); assert.strictEqual(s.cubes['Milan'].blue, 2);
+
+  s = fresh(['scientist', 'medic'], [], { virulent: true });
+  s.virulent = 'red';
+  s.playerDeck.push('Lima', 'EPIDEMIC-VS:unacceptableLoss');
+  s.infectionDeck = s.infectionDeck.filter(c => c !== 'Sydney'); s.infectionDeck.unshift('Sydney');
+  s = E.apply(s, 0, { type: 'endActions' });
+  s = E.apply(s, 0, { type: 'draw' });
+  assert.strictEqual(s.boxed.red, 4);
+  assert.strictEqual(s.supply.red, 24 - 3 - 4);
+
+  s = fresh(['scientist', 'medic'], [], { virulent: true });
+  s.virulent = 'blue'; s.cures.blue = 'eradicated';
+  s.infectionDiscard = ['Paris', 'Cairo'];
+  s.playerDeck.push('Lima', 'EPIDEMIC-VS:hiddenPocket');
+  s.infectionDeck = s.infectionDeck.filter(c => !['Sydney', 'Paris', 'Cairo'].includes(c)); s.infectionDeck.unshift('Sydney');
+  s = E.apply(s, 0, { type: 'endActions' });
+  s = E.apply(s, 0, { type: 'draw' });
+  assert.strictEqual(s.cures.blue, 'cured', 'no longer eradicated');
+  assert.strictEqual(s.cubes['Paris'].blue, 1);
+});
+
+// ---------------------------------------------------------------- Mutation
+test('mutation: setup', () => {
+  const s = E.createGame({ players: [{ name: 'A' }, { name: 'B' }], epidemics: 5, challenges: { mutation: true } });
+  assert.strictEqual(s.supply.purple, 12);
+  assert.strictEqual(s.infectionDiscard.filter(E.isMutationCard).length, 2);
+  assert.strictEqual(s.playerDeck.filter(E.isMutationEvent).length, 3);
+});
+
+test('mutation: mutation card, double infection, mutation events, purple cure and win', () => {
+  let s = fresh(['scientist', 'medic'], [], { mutation: true });
+  s.infectionDiscard = [];
+  s.infectionDeck = s.infectionDeck.filter(c => !['Lima', 'Cairo'].includes(c));
+  s.infectionDeck.unshift('Lima'); // bottom
+  s.infectionDeck.push('Cairo', 'MUTATION1'); // top: mutation card, then Cairo
+  put(s, 'Cairo', 'purple', 1);
+  s = E.apply(s, 0, { type: 'endActions' });
+  s.playerDeck.push('Bogota', 'ME:intensifies');
+  s = E.apply(s, 0, { type: 'draw' });
+  assert(s.playerDiscard.includes('ME:intensifies') && !s.players[0].hand.includes('ME:intensifies'));
+  s = E.apply(s, 0, { type: 'infect' });
+  assert.strictEqual(s.cubes['Lima'].purple, 1, 'mutation card: bottom card gets purple');
+  assert.strictEqual(s.cubes['Lima'].yellow, 0, 'and not its own color');
+  assert.strictEqual(s.cubes['Cairo'].purple, 2, 'purple city infected: +1 purple');
+  assert.strictEqual(s.cubes['Cairo'].black, 1, 'and +1 own color');
+
+  // Purple cure: 4 cards (scientist) of any color, at least one from a city with purple cubes
+  s = fresh(['scientist', 'medic'], [['Paris', 'Tokyo', 'Lagos', 'Delhi']], { mutation: true });
+  expectFail(() => E.apply(s, 0, { type: 'cure', color: 'purple', cards: ['Paris', 'Tokyo', 'Lagos', 'Delhi'] }), /purple cubes/);
+  put(s, 'Delhi', 'purple', 1);
+  s.cures.blue = s.cures.yellow = s.cures.black = s.cures.red = 'cured';
+  s = E.apply(s, 0, { type: 'cure', color: 'purple', cards: ['Paris', 'Tokyo', 'Lagos', 'Delhi'] });
+  assert.strictEqual(s.status, 'won');
+
+  // Win with 4 cures and no purple on the board
+  s = fresh(['scientist', 'medic'], [], { mutation: true });
+  s.cures.blue = s.cures.yellow = s.cures.black = 'cured';
+  s.players[0].hand = ['Tokyo', 'Seoul', 'Beijing', 'Osaka'];
+  s = E.apply(s, 0, { type: 'cure', color: 'red', cards: s.players[0].hand.slice() });
+  assert.strictEqual(s.status, 'won');
+});
+
+test('events: travel ban any time, mobile hospital only when driving, resilient population vs mutation', () => {
+  let s = fresh(['scientist', 'medic'], [[], ['E:commercialTravelBan', 'E:mobileHospital', 'E:resilientPopulation']], { mutation: true });
+  s = E.apply(s, 0, { type: 'pass' });
+  s = E.apply(s, 1, { type: 'playEvent', card: 'E:commercialTravelBan' });
+  assert.strictEqual(s.travelBan, 0, "lasts until the current player's next turn");
+  s = E.apply(s, 1, { type: 'playEvent', card: 'E:mobileHospital' });
+  put(s, 'Chicago', 'blue', 2); put(s, 'Lima', 'yellow', 1);
+  s.players[0].hand.push('Lima');
+  s = E.apply(s, 0, { type: 'move', to: 'Chicago', method: 'drive' });
+  assert.strictEqual(s.cubes['Chicago'].blue, 1, 'drive: removes a cube');
+  s = E.apply(s, 0, { type: 'move', to: 'Lima', method: 'direct' });
+  assert.strictEqual(s.cubes['Lima'].yellow, 1, 'flight: no removal');
+  s.infectionDiscard.push('MUTATION1');
+  s.infectionDeck = s.infectionDeck.filter(c => c !== 'MUTATION1');
+  expectFail(() => E.apply(s, 1, { type: 'playEvent', card: 'E:resilientPopulation', params: { card: 'MUTATION1' } }), /Mutation/);
 });
 
 console.log(`${passed} rule tests passed`);

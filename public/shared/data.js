@@ -6,7 +6,7 @@
   'use strict';
 
   const COLORS = ['blue', 'yellow', 'black', 'red'];
-  const COLOR_HEX = { blue: '#3b7dd8', yellow: '#f2c230', black: '#555b66', red: '#d8433b' };
+  const COLOR_HEX = { blue: '#3b7dd8', yellow: '#f2c230', black: '#555b66', red: '#d8433b', purple: '#9b4fd6' };
 
   // Board coordinates (stylised, roughly matching the physical board) on a 1240x660 canvas,
   // plus real lat/lon used to warp the world-map background so each city sits on its real location.
@@ -140,29 +140,62 @@
     containmentSpecialist: { name: 'Containment Specialist', color: '#5fc8e8', set: 'brink',
       text: 'When you enter a city, remove 1 cube of each color that has 2 or more cubes there.' },
     epidemiologist: { name: 'Epidemiologist', color: '#b062d6', set: 'brink',
-      text: 'Once during your turn (free, not an action), take any City card from another player in your city.' },
+      text: 'Once during your turn (not an action), take any City card from a player in the same city as you.' },
     fieldOperative: { name: 'Field Operative', color: '#c9a55a', set: 'brink',
       text: 'Once per turn, as an action, move 1 cube from your city onto this card. When discovering a cure, you may replace 2 City cards with 3 cubes of that color from this card.' },
     generalist: { name: 'Generalist', color: '#9aa0a8', set: 'brink',
       text: 'You may take up to 5 actions each turn.' },
     troubleshooter: { name: 'Troubleshooter', color: '#e0524a', set: 'brink',
-      text: 'At the start of your turn, see the top Infection cards (as many as the infection rate). As an action, Direct Flight by revealing (not discarding) the destination City card.' },
+      text: 'Start your turn by looking at as many Infection cards as the infection rate. When you take a Direct Flight, reveal the City card used but do not discard it.' },
   };
 
+  // Event texts follow the 2nd-edition cards.
   const EVENTS = {
     airlift: { name: 'Airlift', set: 'base', text: 'Move any 1 pawn to any city.' },
     forecast: { name: 'Forecast', set: 'base', text: 'Look at the top 6 Infection cards and rearrange them in any order.' },
     governmentGrant: { name: 'Government Grant', set: 'base', text: 'Add 1 research station to any city (no City card needed).' },
     oneQuietNight: { name: 'One Quiet Night', set: 'base', text: 'Skip the next Infect Cities step.' },
     resilientPopulation: { name: 'Resilient Population', set: 'base', text: 'Remove any 1 card in the Infection Discard Pile from the game. (Can be played between the Infect and Intensify steps of an epidemic.)' },
-    borrowedTime: { name: 'Borrowed Time', set: 'brink', text: 'The current player may take 2 extra actions this turn (play during the actions phase).' },
-    commercialTravelBan: { name: 'Commercial Travel Ban', set: 'brink', text: 'Play at the start of your turn. Draw only 1 Infection card in each Infect Cities step until your next turn begins.' },
-    mobileHospital: { name: 'Mobile Hospital', set: 'brink', text: 'For the rest of this turn, the current player removes 1 cube when entering a city.' },
-    newAssignment: { name: 'New Assignment', set: 'brink', text: "Exchange any player's role with an unused role." },
-    rapidVaccineDeployment: { name: 'Rapid Vaccine Deployment', set: 'brink', text: 'Play right after a cure is discovered: remove up to 5 cubes of that color from a group of connected cities (at least 1 from each).' },
-    reexaminedResearch: { name: 'Re-examined Research', set: 'brink', text: 'Take a City card from the Player Discard pile and give it to any player.' },
-    remoteTreatment: { name: 'Remote Treatment', set: 'brink', text: 'Remove up to 2 disease cubes from anywhere on the board.' },
-    specialOrders: { name: 'Special Orders', set: 'brink', text: 'For the rest of this turn, the current player may move one other pawn as if it were their own.' },
+    borrowedTime: { name: 'Borrowed Time', set: 'brink', text: 'Take 2 extra actions this turn (only while the current player is still taking actions).' },
+    commercialTravelBan: { name: 'Commercial Travel Ban', set: 'brink', text: "The infection rate is 1 until the current player's next turn begins." },
+    mobileHospital: { name: 'Mobile Hospital', set: 'brink', text: 'This turn, remove 1 disease cube from each city the current player drives/ferries to.' },
+    newAssignment: { name: 'New Assignment', set: 'brink', text: 'Select a player. That player may swap their Role with any one of the unused Roles.' },
+    rapidVaccineDeployment: { name: 'Rapid Vaccine Deployment', set: 'brink', text: 'Play immediately after a Discover a Cure action to remove 1-5 cubes of the cured disease. These cubes must come from connected cities.' },
+    reexaminedResearch: { name: 'Re-examined Research', set: 'brink', text: 'Select a player. That player may draw any 1 City card from the Player Discard Pile into their hand.' },
+    remoteTreatment: { name: 'Remote Treatment', set: 'brink', text: 'Remove 2 disease cubes from the board.' },
+    specialOrders: { name: 'Special Orders', set: 'brink', text: 'This turn, the current player may spend actions to move 1 other pawn as if it were their own.' },
+  };
+
+  // Virulent Strain challenge: epidemic cards whose extra effect hits only the Virulent Strain disease.
+  const VIRULENT = {
+    chronicEffect: { name: 'Chronic Effect', continuing: true,
+      text: 'During Infections, when a Virulent Strain city with no Virulent Strain cubes is drawn, place 2 cubes instead of 1. (Not for Epidemics or Outbreaks.)' },
+    complexMolecularStructure: { name: 'Complex Molecular Structure', continuing: true,
+      text: 'Until it is cured, you need 1 more City card to Discover a Cure for the Virulent Strain.' },
+    governmentInterference: { name: 'Government Interference', continuing: true,
+      text: 'To leave a city with Virulent Strain cubes, the current player must first Treat at least 1 Virulent Strain cube in that city this turn.' },
+    rateEffect: { name: 'Rate Effect', continuing: true,
+      text: 'During Infections, draw 1 more card than the infection rate if at least 1 Infection card drawn was a Virulent Strain city.' },
+    slipperySlope: { name: 'Slippery Slope', continuing: true,
+      text: 'Virulent Strain outbreaks move the outbreak marker forward 2 spaces (not 1).' },
+    hiddenPocket: { name: 'Hidden Pocket', continuing: false,
+      text: 'If the Virulent Strain is eradicated but at least 1 of its cards is in the Infection Discard Pile, it is no longer eradicated: place 1 cube on each of those cities.' },
+    unacceptableLoss: { name: 'Unacceptable Loss', continuing: false,
+      text: 'Remove 4 Virulent Strain cubes from the supply (from the game).' },
+    uncountedPopulations: { name: 'Uncounted Populations', continuing: false,
+      text: 'Place 1 Virulent Strain cube on each city with exactly 1 of these cubes.' },
+  };
+
+  // Mutation challenge: a 5th (purple) disease with 12 cubes.
+  const MUTATION_EVENTS = {
+    threatens: { name: 'The Mutation Threatens!', text: 'If purple is not eradicated: draw the bottom Infection card and place 3 purple cubes there.' },
+    spreads: { name: 'The Mutation Spreads', text: 'If purple is not eradicated: draw 3 cards from the bottom of the Infection deck and place 1 purple cube on each.' },
+    intensifies: { name: 'The Mutation Intensifies!', text: 'Place 1 purple cube on each city with exactly 2 purple cubes.' },
+  };
+
+  const CHALLENGES = {
+    virulent: { name: 'Virulent Strain', text: 'One disease becomes particularly nasty: special epidemic cards add lasting or immediate effects to it.' },
+    mutation: { name: 'Mutation', text: 'A 5th purple disease (only 12 cubes) appears through Mutation cards. Cure it with 5 City cards of any color, at least one from a city with purple cubes.' },
   };
 
   const DIFFICULTIES = [
@@ -172,5 +205,5 @@
     { epidemics: 7, name: 'Legendary' },
   ];
 
-  return { COLORS, COLOR_HEX, CITIES, MAP_W, MAP_H, EDGES, ADJ, ROLES, EVENTS, DIFFICULTIES };
+  return { COLORS, COLOR_HEX, CITIES, MAP_W, MAP_H, EDGES, ADJ, ROLES, EVENTS, VIRULENT, MUTATION_EVENTS, CHALLENGES, DIFFICULTIES };
 }));

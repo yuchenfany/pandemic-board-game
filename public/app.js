@@ -2,7 +2,8 @@
 'use strict';
 const { CITIES, COLORS, COLOR_HEX, ROLES, EVENTS, DIFFICULTIES, EDGES, MAP_W, MAP_H } = PData;
 const CITY_NAMES = Object.keys(CITIES).sort();
-const ICON = { blue: '🔵', yellow: '🟡', black: '⚫', red: '🔴' };
+const ICON = { blue: '🔵', yellow: '🟡', black: '⚫', red: '🔴', purple: '🟣' };
+const gcolors = (g) => (g && g.colors) || COLORS;
 
 let net = null;
 const ui = {
@@ -285,6 +286,15 @@ function renderLobby() {
   const evSel = h('select', { disabled: !isHost, onchange: (e) => req('config', { eventsPerPlayer: Number(e.target.value) }) },
     [0, 1, 2, 3].map(n => h('option', { value: n }, `${n} per player${n === 2 ? ' (recommended)' : ''}`)));
   evSel.value = cfg.eventsPerPlayer;
+  const chal = cfg.challenges || {};
+  const chalBox = (key) => h('label', { class: 'check challenge', 'data-tip': PData.CHALLENGES[key].text, 'data-tip-title': PData.CHALLENGES[key].name },
+    h('input', { type: 'checkbox', checked: !!chal[key], disabled: !isHost, onchange: (e) => req('config', { challenges: { [key]: e.target.checked } }) }),
+    PData.CHALLENGES[key].name);
+  const challenges = h('div', null,
+    chalBox('virulent'), chalBox('mutation'),
+    h('label', { class: 'check challenge off', 'data-tip': "Not available online: the Bio-Terrorist's moves must stay secret from everyone, but the host's browser holds the whole game." },
+      h('input', { type: 'checkbox', disabled: true }), 'Bio-Terrorist ', h('span', { class: 'tag' }, 'not available')),
+    (chal.virulent || chal.mutation) ? h('p', { class: 'fine' }, 'Tip: the rulebook suggests 1 fewer epidemic than usual when adding a challenge.') : null);
 
   const roleCards = [
     h('div', { class: 'role-card' + (!mySeat.role ? ' mine' : ''), style: { '--rc': '#6b7a8f' }, onclick: () => req('pickRole', { role: null }) },
@@ -316,6 +326,7 @@ function renderLobby() {
         h('h2', { style: { marginTop: '18px' } }, 'Settings'),
         h('label', null, 'Difficulty', diffSel),
         h('label', null, 'Event cards', evSel),
+        h('label', null, 'Challenges'), challenges,
         h('div', { class: 'row', style: { marginTop: '14px' } },
           isHost ? h('button', { class: 'primary big', style: { flex: '1' }, disabled: r.seats.length < 2, onclick: () => req('start') },
             r.seats.length < 2 ? 'Waiting for players…' : 'Start game') : h('span', { class: 'muted', style: { flex: '1' } }, 'Waiting for the host to start…'),
@@ -383,8 +394,8 @@ function buildMap() {
       onmouseenter: () => showTip(name), onmouseleave: hideTip },
     s('circle', { class: 'hit', r: 18, fill: 'transparent' }),
     s('circle', { class: 'ring', r: 15 }),
-    s('circle', { class: 'dotc', r: 9, fill: COLOR_HEX[c.color] }),
-    s('text', { y: 24 }, name));
+    s('circle', { class: 'dotc', r: 10.5, fill: COLOR_HEX[c.color] }),
+    s('text', { y: 27 }, name));
     cities.append(g);
   });
   svg.append(edges, s('g', { id: 'dyn', class: 'dyn' }), cities, s('g', { id: 'pawns' }), s('g', { id: 'fx', class: 'dyn' }));
@@ -460,7 +471,7 @@ function showTip(city) {
   const g = ui.game;
   if (!g) return;
   const c = CITIES[city];
-  const cubes = COLORS.filter(col => g.cubes[city][col]).map(col => `${ICON[col]} ${g.cubes[city][col]}`).join('  ');
+  const cubes = gcolors(g).filter(col => g.cubes[city][col]).map(col => `${ICON[col]} ${g.cubes[city][col]}`).join('  ');
   const here = g.players.filter(p => p.location === city).map(p => p.name);
   const tip = $('#tip');
   tip.innerHTML = '';
@@ -496,7 +507,7 @@ function renderMap(g, delays = {}) {
   document.querySelectorAll('#map .city').forEach(el => {
     const name = el.dataset.city;
     el.classList.toggle('reachable', reach.has(name));
-    el.classList.toggle('danger', COLORS.some(c => g.cubes[name][c] >= 3));
+    el.classList.toggle('danger', gcolors(g).some(c => g.cubes[name][c] >= 3));
   });
 
   const dyn = $('#dyn');
@@ -508,19 +519,19 @@ function renderMap(g, delays = {}) {
         s('path', { d: 'M5.5 5 h3 v2 h2 v3 h-2 v2 h-3 v-2 h-2 v-3 h2 z', fill: '#d8433b', transform: 'scale(.8) translate(1.8,1)' })));
     }
     let row = 0;
-    COLORS.forEach(col => {
+    gcolors(g).forEach(col => {
       const n = g.cubes[name][col];
       const before = prev ? prev[name][col] : n;
       const shown = Math.max(n, before);
       if (!shown) return;
       for (let k = 0; k < shown; k++) {
-        const x = c.x + 12 + k * 10, y = c.y - 17 + row * 11;
+        const x = c.x + 14 + k * 13.5, y = c.y - 21 + row * 14;
         let cls = 'cube', style = '';
         if (k >= n) cls += ' cube-gone';
         else if (k >= before) { cls += ' cube-new'; style = `animation-delay:${(delays[name] || 0) + (k - before) * 140}ms`; }
         dyn.append(s('g', { class: cls, style },
-          s('rect', { x, y, width: 9, height: 9, rx: 1.5, fill: COLOR_HEX[col], stroke: 'rgba(0,0,0,.7)', 'stroke-width': 1 }),
-          s('rect', { x: x + 1, y: y + 1, width: 7, height: 2.5, rx: 1, fill: '#fff', opacity: 0.35 })));
+          s('rect', { x, y, width: 12, height: 12, rx: 2, fill: COLOR_HEX[col], stroke: 'rgba(0,0,0,.8)', 'stroke-width': 1.2 }),
+          s('rect', { x: x + 1.5, y: y + 1.5, width: 9, height: 3, rx: 1, fill: '#fff', opacity: 0.35 })));
       }
       row++;
     });
@@ -567,6 +578,8 @@ function onCityClick(city) {
   if (g.current !== ui.you || g.turn.phase !== 'actions' || g.status !== 'playing') return;
   const pawn = selectedPawn(g);
   const opts = Engine.getMoveOptions(g, ui.you, pawn, city);
+  const blocked = Engine.leaveBlocked(g, pawn);
+  if (blocked) { toast(blocked); return; }
   if (!opts.length) { toast(`Can't reach ${city} from ${g.players[pawn].location} with one action`, 'info'); return; }
   const go = (o, card) => send({ type: 'move', pawn, to: city, method: o.method, card });
   const choices = [];
@@ -594,7 +607,16 @@ function scanLog(g) {
   let t = 0;
   fresh.forEach((e, i) => {
     let m;
-    if ((m = e.msg.match(/^(.+?) drew an EPIDEMIC/))) {
+    if ((m = e.msg.match(/^(.+?) drew (The Mutation .+)$/))) {
+      draws.push({ player: m[1], mutation: m[2] });
+      alerts.push({ big: 'MUTATION', sub: m[2], cls: 'mut' });
+      t += 300;
+    } else if ((m = e.msg.match(/^The VIRULENT STRAIN is (\w+)/))) {
+      alerts.push({ big: 'VIRULENT STRAIN', sub: `${m[1]} is now the Virulent Strain`, cls: '' });
+    } else if ((m = e.msg.match(/^Virulent Strain effect — ([^:.]+)/))) {
+      const eff = Object.values(PData.VIRULENT).find(x => x.name === m[1].trim());
+      alerts.push({ big: m[1].trim().toUpperCase(), sub: eff ? eff.text : '', cls: 'warn' });
+    } else if ((m = e.msg.match(/^(.+?) drew an EPIDEMIC/))) {
       const next = fresh[i + 1] && fresh[i + 1].msg.match(/^Infect (.+?) \(/);
       alerts.push({ big: 'EPIDEMIC', sub: next ? `${next[1]} is hit with 3 cubes` : e.msg, cls: '' });
       draws.push({ player: m[1], epidemic: true });
@@ -667,6 +689,8 @@ function animateDraws(g, draws) {
     let target, label, cls;
     if (d.epidemic) {
       target = $('#mapwrap'); label = '☣ EPIDEMIC'; cls = 'epi';
+    } else if (d.mutation) {
+      target = $('#mapwrap'); label = '🧬 ' + d.mutation; cls = 'mut';
     } else {
       const city = CITIES[d.card];
       const ev = Object.values(EVENTS).find(e => e.name === d.card);
@@ -690,12 +714,13 @@ function flyCard(fromEl, toEl, label, cls, done) {
     h('div', { class: 'band' }), h('div', { class: 'fl' }, label));
   $('#flylayer').append(card);
   const dx = b.left + b.width / 2 - (a.left + a.width / 2), dy = b.top + b.height / 2 - (a.top + a.height / 2);
-  const scale = cls === 'epi' ? 2.2 : 1;
+  const big = cls === 'epi' || cls === 'mut';
+  const scale = big ? 2.2 : 1;
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    card.style.transform = `translate(${dx}px, ${dy}px) rotate(${cls === 'epi' ? 0 : -6 + Math.random() * 12}deg) scale(${scale})`;
+    card.style.transform = `translate(${dx}px, ${dy}px) rotate(${big ? 0 : -6 + Math.random() * 12}deg) scale(${scale})`;
   }));
   setTimeout(() => { card.classList.add('land'); if (done) done(); }, 700);
-  setTimeout(() => card.remove(), cls === 'epi' ? 1500 : 1000);
+  setTimeout(() => card.remove(), big ? 1500 : 1000);
 }
 
 function flashCity(city, cls) {
@@ -726,6 +751,11 @@ function showAlerts(list) {
 // ------------------------------------------------------------ game render
 
 const chip = (card, opts = {}) => {
+  if (Engine.isMutationCard(card) || Engine.isMutationEvent(card)) {
+    const mtip = Engine.isMutationEvent(card) ? PData.MUTATION_EVENTS[card.slice(3)].text : 'Mutation: the bottom Infection card gets 1 purple cube.';
+    return h('span', { class: 'chip purple', style: { background: COLOR_HEX.purple }, 'data-tip': mtip }, '🧬 ' + Engine.cardName(card));
+  }
+  if (Engine.isEpidemic(card)) return h('span', { class: 'chip', style: { background: '#7a1d17' } }, '☣ ' + Engine.cardName(card));
   if (Engine.isEvent(card)) {
     const ev = EVENTS[Engine.eventKey(card)];
     return h('span', { class: 'chip event' + (opts.onclick ? ' clickable' : ''), 'data-tip': ev.text, 'data-tip-title': ev.name, onclick: opts.onclick }, '★ ' + ev.name);
@@ -760,16 +790,22 @@ function renderTopbar(g) {
     h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Infection rate'),
       h('div', { class: 'track rate' }, rates.map((r, i) => h('span', { class: i === g.rateIdx ? 'cur' : i < g.rateIdx ? 'past' : '' }, r)))),
     h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Cures'),
-      COLORS.map(c => h('span', { class: 'vial ' + g.cures[c], title: `${c}: ${g.cures[c]}`,
-        style: { borderColor: COLOR_HEX[c], background: g.cures[c] === 'none' ? 'transparent' : COLOR_HEX[c] } },
+      gcolors(g).map(c => h('span', { class: 'vial ' + g.cures[c] + (c === g.virulent ? ' virulent' : ''), 'data-tip': `${c}: ${g.cures[c] === 'none' ? 'not cured' : g.cures[c]}${c === g.virulent ? ' — the Virulent Strain' : ''}`,
+        style: { '--vc': COLOR_HEX[c], borderColor: COLOR_HEX[c], background: g.cures[c] === 'none' ? 'transparent' : COLOR_HEX[c] } },
       g.cures[c] === 'cured' ? '✓' : g.cures[c] === 'eradicated' ? '★' : ''))),
     h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Cubes'),
-      h('div', { class: 'supply' }, COLORS.map(c => h('div', { class: 'bar' + (g.supply[c] <= 5 ? ' low' : '') },
-        h('div', { class: 'bg' }, h('i', { style: { width: `${(g.supply[c] / 24) * 100}%`, background: COLOR_HEX[c] } })), g.supply[c])))),
+      h('div', { class: 'supply' }, gcolors(g).map(c => h('div', { class: 'bar' + (g.supply[c] <= 5 ? ' low' : '') },
+        h('div', { class: 'bg' }, h('i', { style: { width: `${(g.supply[c] / (c === 'purple' ? 12 : 24)) * 100}%`, background: COLOR_HEX[c] } })), g.supply[c])))),
     h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Deck'),
       h('span', { id: 'deckStat', 'data-tip': 'Cards left in the player deck. You lose if you must draw and cannot.' }, `🂠 ${g.playerDeckCount}`),
       h('span', { class: 'muted small' }, `${g.epidemicsLeft} epidemic${g.epidemicsLeft === 1 ? '' : 's'} left`)),
     h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Stations'), `🏥 ${g.stations.length}/${Engine.MAX_STATIONS}`),
+    g.challenges && g.challenges.virulent ? h('div', { class: 'stat vs', 'data-tip-title': 'Virulent Strain',
+      'data-tip': g.virulent ? (g.vsEffects.length ? g.vsEffects.map(k => `${PData.VIRULENT[k].name}: ${PData.VIRULENT[k].text}`).join('  •  ') : 'No continuing effects yet.')
+        : 'Revealed at the first epidemic: the disease with the most cubes on the board.' },
+    h('span', { class: 'lbl' }, 'Virulent'),
+    g.virulent ? [h('span', { class: 'cube', style: { background: COLOR_HEX[g.virulent] } }), ` ${g.virulent}`, g.vsEffects.length ? h('span', { class: 'tag' }, `${g.vsEffects.length} effect${g.vsEffects.length > 1 ? 's' : ''}`) : null]
+      : h('span', { class: 'muted small' }, 'unknown')) : null,
     ...[g.quietNight ? h('span', { class: 'tag' }, '🌙 Quiet night') : null,
       g.travelBan != null ? h('span', { class: 'tag' }, '🚫 Travel ban') : null].filter(Boolean),
     h('div', { class: 'topbtns' },
@@ -810,7 +846,16 @@ function showHelp() {
     h('h4', null, 'Roles'),
     Object.values(ROLES).map(r => h('div', null, h('b', { style: { color: r.color } }, r.name), ' — ', r.text)),
     h('h4', null, 'Events'),
-    Object.values(EVENTS).map(e => h('div', null, h('b', null, e.name), ' — ', e.text))),
+    Object.values(EVENTS).map(e => h('div', null, h('b', null, e.name), ' — ', e.text)),
+    h('h4', null, 'Challenge: Virulent Strain'),
+    h('div', null, 'At the first epidemic, the disease with the most cubes becomes the Virulent Strain. Each epidemic card also has an effect on it:'),
+    Object.values(PData.VIRULENT).map(v => h('div', null, h('b', null, v.name), v.continuing ? ' (continuing)' : ' (immediate)', ' — ', v.text)),
+    h('h4', null, 'Challenge: Mutation'),
+    h('div', null, 'Purple has only 12 cubes. 2 Mutation cards in the infection deck put a purple cube on the bottom infection card. ',
+      'When a city with purple cubes is infected it gets 1 purple and 1 of its own color. ',
+      'Cure purple with 5 City cards of any color (at least 1 from a city with purple cubes). ',
+      'Win by curing all 5 diseases, or the other 4 with no purple left on the board.'),
+    Object.values(PData.MUTATION_EVENTS).map(v => h('div', null, h('b', null, v.name), ' — ', v.text))),
   [h('button', { onclick: closeModal }, 'Close')]);
 }
 
@@ -834,8 +879,8 @@ function renderPlayers(g) {
       h('div', { class: 'hand' },
         p.hand.map(c => chip(c)),
         p.stored ? [h('span', { class: 'muted small' }, 'Stored:'), chip(p.stored)] : null,
-        p.role === 'fieldOperative' && COLORS.some(c => p.samples[c]) ? h('span', { class: 'muted small' }, 'Samples: ',
-          COLORS.map(c => p.samples[c] ? `${ICON[c]}×${p.samples[c]} ` : null)) : null)));
+        p.role === 'fieldOperative' && gcolors(g).some(c => p.samples[c]) ? h('span', { class: 'muted small' }, 'Samples: ',
+          gcolors(g).map(c => p.samples[c] ? `${ICON[c]}×${p.samples[c]} ` : null)) : null)));
   });
 }
 
@@ -871,10 +916,10 @@ function renderHand(g) {
   if (me.stored) box.append(cardEl(me.stored, true));
   if (!me.hand.length && !me.stored) box.append(h('div', { class: 'label' }, h('span', { class: 'muted' }, 'No cards')));
   // Cure progress
-  const need = Engine.cardsNeededForCure(me, false);
-  box.append(h('div', { class: 'cure-hint' }, COLORS.filter(c => g.cures[c] === 'none').map(c => {
-    const n = me.hand.filter(x => CITIES[x] && CITIES[x].color === c).length;
-    return h('div', { class: n >= need ? 'ok' : '' }, `${ICON[c]} ${n}/${need} for cure`);
+  box.append(h('div', { class: 'cure-hint' }, gcolors(g).filter(c => g.cures[c] === 'none').map(c => {
+    const n = Engine.cureCards(g, me, c).length, need = Engine.cardsNeededForCure(g, me, c, false);
+    return h('div', { class: n >= need ? 'ok' : '', 'data-tip': c === 'purple' ? 'Purple: any City cards, at least 1 from a city with purple cubes' : `${need} ${c} cards cure ${c}` },
+      `${ICON[c]} ${n}/${need}${c === 'purple' ? ' any' : ''} for cure`);
   })));
 }
 
@@ -958,7 +1003,7 @@ function renderTurnRow(g) {
     } else send({ type: 'build' });
   }, { disabled: !canBuild, title: g.stations.includes(here) ? 'Already a station here' : me.role === 'opsExpert' ? 'No card needed' : `Discard ${here}` }));
 
-  COLORS.filter(c => g.cubes[here][c] > 0).forEach(c => add(btn('💉', `Treat ${c}`, () => send({ type: 'treat', color: c }),
+  gcolors(g).filter(c => g.cubes[here][c] > 0).forEach(c => add(btn('💉', `Treat ${c}`, () => send({ type: 'treat', color: c }),
     { class: 'colorbtn', style: { '--c': COLOR_HEX[c] } })));
 
   const shares = Engine.getShareOptions(g, ui.you);
@@ -967,12 +1012,13 @@ function renderTurnRow(g) {
     onClick: () => send({ type: 'share', ...o }),
   }))), { disabled: !shares.length, title: 'Give or take the card matching your city with a player in the same city' }));
 
-  const cureColors = COLORS.filter(c => {
+  const cureColors = gcolors(g).filter(c => {
     if (g.cures[c] !== 'none' || !g.stations.includes(here)) return false;
-    const cnt = me.hand.filter(x => CITIES[x] && CITIES[x].color === c).length;
+    const cnt = Engine.cureCards(g, me, c).length;
     const samples = me.role === 'fieldOperative' && me.samples[c] >= 3;
-    return cnt >= Engine.cardsNeededForCure(me, false) || (samples && cnt >= Engine.cardsNeededForCure(me, true));
+    return cnt >= Engine.cardsNeededForCure(g, me, c, false) || (samples && cnt >= Engine.cardsNeededForCure(g, me, c, true));
   });
+
   add(btn('🧪', 'Cure', () => cureDialog(g, cureColors), { disabled: !cureColors.length, title: 'At a research station with enough cards of one color' }));
 
   if (me.role === 'contingencyPlanner') {
@@ -984,7 +1030,7 @@ function renderTurnRow(g) {
     add(btn('🗄', `Retrieve ${here}`, () => send({ type: 'archivistRetrieve' }), { disabled: g.turn.flags.archivist || !g.playerDiscard.includes(here) }));
   }
   if (me.role === 'fieldOperative') {
-    COLORS.filter(c => g.cubes[here][c] > 0).forEach(c => add(btn('🧫', `Sample ${c}`, () => send({ type: 'fieldSample', color: c }),
+    gcolors(g).filter(c => g.cubes[here][c] > 0).forEach(c => add(btn('🧫', `Sample ${c}`, () => send({ type: 'fieldSample', color: c }),
       { disabled: g.turn.flags.sample, class: 'colorbtn', style: { '--c': COLOR_HEX[c] } })));
   }
   if (me.role === 'epidemiologist') {
@@ -1009,13 +1055,16 @@ function renderTurnRow(g) {
 function cureDialog(g, colors) {
   const me = g.players[ui.you];
   const pickColor = (color) => {
-    const cards = me.hand.filter(x => CITIES[x] && CITIES[x].color === color);
+    const cards = Engine.cureCards(g, me, color)
+      .sort((a, b) => (color === 'purple' ? g.cubes[b].purple - g.cubes[a].purple : 0));
+    const need = Engine.cardsNeededForCure(g, me, color, false);
     const canSample = me.role === 'fieldOperative' && me.samples[color] >= 3;
-    const boxes = cards.map((c, i) => ({ c, box: h('input', { type: 'checkbox', checked: i < Engine.cardsNeededForCure(me, false) }) }));
+    const boxes = cards.map((c, i) => ({ c, box: h('input', { type: 'checkbox', checked: i < need }) }));
     const sampleBox = canSample ? h('input', { type: 'checkbox' }) : null;
     const body = h('div', null,
-      h('p', { class: 'muted' }, `Select ${Engine.cardsNeededForCure(me, false)} cards` + (canSample ? ` (or ${Engine.cardsNeededForCure(me, true)} cards + 3 samples)` : '') + '.'),
-      boxes.map(({ c, box }) => h('label', { class: 'check' }, box, chip(c))),
+      h('p', { class: 'muted' }, `Select ${need} ${color === 'purple' ? 'City cards of any color — at least 1 from a city with purple cubes' : 'cards'}` +
+        (canSample ? ` (or ${Engine.cardsNeededForCure(g, me, color, true)} cards + 3 samples)` : '') + '.'),
+      boxes.map(({ c, box }) => h('label', { class: 'check' }, box, chip(c), color === 'purple' && g.cubes[c].purple ? ` 🟣×${g.cubes[c].purple}` : '')),
       sampleBox ? h('label', { class: 'check' }, sampleBox, 'Use 3 samples from my role card') : null);
     openModal(`🧪 Discover a cure: ${color}`, body, [cancelBtn(), h('button', { class: 'primary', onclick: () => {
       closeModal();
@@ -1036,7 +1085,7 @@ function playEventDialog(card, fromStored) {
   const players = g.players.map((p, i) => [i, `${p.name} (${ROLES[p.role].name})`]);
   const cityOpts = CITY_NAMES.map(c => [c, c]);
   const withCubes = [];
-  CITY_NAMES.forEach(c => COLORS.forEach(col => { if (g.cubes[c][col]) withCubes.push([`${c}|${col}`, `${c} — ${col} (${g.cubes[c][col]})`]); }));
+  CITY_NAMES.forEach(c => gcolors(g).forEach(col => { if (g.cubes[c][col]) withCubes.push([`${c}|${col}`, `${c} — ${col} (${g.cubes[c][col]})`]); }));
   const title = `★ ${ev.name}`;
 
   switch (key) {
@@ -1113,13 +1162,26 @@ function maybeOpenForecast(g) {
 
 // ------------------------------------------------------------ log & chat
 
+// Colour city names (by their disease) and disease names in log lines.
+const LOG_TEXT = { blue: '#79adff', yellow: '#f2c230', black: '#b9c1cd', red: '#ff6e64', purple: '#c58cff' };
+const escapeRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const LOG_RE = new RegExp('(' + [...Object.keys(CITIES).sort((a, b) => b.length - a.length).map(escapeRe),
+  '\\bblue\\b', '\\byellow\\b', '\\bblack\\b', '\\bred\\b', '\\bpurple\\b'].join('|') + ')', 'g');
+function colorize(msg) {
+  return msg.split(LOG_RE).map((part, i) => {
+    if (i % 2 === 0) return part;
+    const color = CITIES[part] ? CITIES[part].color : part;
+    return h('span', { class: CITIES[part] ? 'lc' : 'ld', style: { color: LOG_TEXT[color] } }, part);
+  });
+}
+
 function renderLog(g) {
   const v = $('#logView');
   const atBottom = v.scrollHeight - v.scrollTop - v.clientHeight < 30;
   v.innerHTML = '';
   g.log.forEach(e => {
     const cls = /EPIDEMIC|ERADICATED|cure|VICTORY|GAME OVER/.test(e.msg) ? 'ep' : /OUTBREAK/.test(e.msg) ? 'ob' : /^---/.test(e.msg) ? 'turn' : '';
-    v.append(h('div', { class: cls }, e.msg));
+    v.append(h('div', { class: cls }, colorize(e.msg)));
   });
   if (atBottom || !renderLog.done) v.scrollTop = v.scrollHeight;
   renderLog.done = true;

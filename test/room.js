@@ -9,12 +9,15 @@ assert(a.token && b.token && a.token !== b.token);
 assert.strictEqual(r.hostToken, a.token, 'first joiner hosts');
 assert(r.handle(b.token, 'config', { epidemics: 6 }).error, 'only host configures');
 assert(r.handle(a.token, 'config', { epidemics: 6 }).ok);
+assert(r.handle(a.token, 'config', { challenges: { mutation: true } }).ok);
+assert.deepStrictEqual(r.config.challenges, { virulent: false, mutation: true });
 assert(r.handle(a.token, 'pickRole', { role: 'medic' }).ok);
 assert(r.handle(b.token, 'pickRole', { role: 'medic' }).error, 'role taken');
 assert(r.handle(b.token, 'start').error, 'only host starts');
 assert(r.handle(a.token, 'start').ok);
 assert.strictEqual(r.game.players[0].role, 'medic');
 assert.strictEqual(r.game.epidemics, 6);
+assert(r.game.challenges.mutation && r.game.colors.includes('purple'));
 assert(r.handle(null, 'join', { name: 'Late' }).error, 'no new seats after start');
 assert.strictEqual(r.handle(null, 'join', { token: b.token }).token, b.token, 'rejoin by token');
 

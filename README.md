@@ -42,14 +42,18 @@ Open two browser windows (one normal, one incognito) to play against yourself.
 - 13 roles: 7 base (2nd ed.) + 6 On the Brink (Archivist, Containment Specialist, Epidemiologist, Field Operative, Generalist, Troubleshooter).
 - 13 events: 5 base + 8 On the Brink. Event count is configurable (default 2 per player, as OtB suggests).
 - Difficulty from Introductory (4 epidemics) up to Legendary (7).
+- **Challenges** (toggle in the lobby, can be combined):
+  - **Virulent Strain**: the 8 Virulent Strain epidemic cards (Chronic Effect, Complex Molecular Structure, Government Interference, Rate Effect, Slippery Slope, Hidden Pocket, Unacceptable Loss, Uncounted Populations).
+  - **Mutation**: a purple 5th disease (12 cubes), 2 Mutation infection cards and 3 Mutation event cards.
 - Up to 5 players, game log, team chat, reconnect.
 
-## Known simplifications / not yet implemented
-- **Challenges are not implemented**: Virulent Strain, Mutation (purple disease), Bio-Terrorist.
+## Known simplifications
+- **Bio-Terrorist challenge is not available.** Its secret moves can't stay hidden when the host's browser holds the whole game.
 - No consent prompts. The current player can Share Knowledge, Dispatcher-move, or Epidemiologist-take without the other player confirming.
 - Mobile Hospital removes the color with the most cubes automatically (no choice).
-- Some On the Brink card wording (Special Orders, Re-examined Research, Mobile Hospital) is paraphrased from memory. Check it against your physical cards. Text is in `shared/data.js`; logic is in `shared/engine.js` → `playEvent`.
+- If one draw contains two Mutation events, they resolve in the order drawn (the rules let the player choose).
 - The starting player is random (the official rule is highest city population).
+- Card and challenge texts follow the 2nd-edition On the Brink rulebook (`public/shared/data.js`).
 
 ## Layout
 ```
