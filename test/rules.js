@@ -71,7 +71,7 @@ test('outbreak chain and outbreak counter', () => {
   s.travelBan = 1; // draw exactly one infection card
   s = E.apply(s, 0, { type: 'infect' });
   assert.strictEqual(s.outbreaks, 2, 'Paris -> London chain');
-  assert.strictEqual(s.cubes['Essen'].blue, 2, 'Essen gets one from each');
+  assert.strictEqual(s.cubes['Copenhagen'].blue, 2, 'Copenhagen gets one from each');
   assert.strictEqual(s.cubes['Madrid'].blue, 2);
   assert.strictEqual(s.cubes['Paris'].blue, 3);
   assert.strictEqual(s.current, 1, 'turn passed');
@@ -164,10 +164,10 @@ test('dispatcher, ops expert, troubleshooter, generalist, containment', () => {
   assert.strictEqual(s.players[1].location, 'Tokyo');
 
   s = fresh(['opsExpert', 'medic'], [['Lima']]);
-  s = E.apply(s, 0, { type: 'move', to: 'Sydney', method: 'ops', card: 'Lima' });
-  assert.strictEqual(s.players[0].location, 'Sydney');
+  s = E.apply(s, 0, { type: 'move', to: 'Auckland', method: 'ops', card: 'Lima' });
+  assert.strictEqual(s.players[0].location, 'Auckland');
   s = E.apply(s, 0, { type: 'build' });
-  assert(s.stations.includes('Sydney'));
+  assert(s.stations.includes('Auckland'));
 
   s = fresh(['troubleshooter', 'medic'], [['Cairo']]);
   s = E.apply(s, 0, { type: 'move', to: 'Cairo', method: 'troubleshooter' });
@@ -235,11 +235,11 @@ test('events: forecast, grant, travel ban, borrowed time, RVD, remote treatment'
 
 test('6 stations max', () => {
   let s = fresh(['opsExpert', 'medic']);
-  s.stations = ['Austin', 'Paris', 'Tokyo', 'Lima', 'Cairo', 'Sydney'];
+  s.stations = ['Austin', 'Paris', 'Tokyo', 'Lima', 'Cairo', 'Auckland'];
   s.players[0].location = 'Chicago';
   expectFail(() => E.apply(s, 0, { type: 'build' }), /pick one/);
-  s = E.apply(s, 0, { type: 'build', remove: 'Sydney' });
-  assert(s.stations.includes('Chicago') && !s.stations.includes('Sydney'));
+  s = E.apply(s, 0, { type: 'build', remove: 'Auckland' });
+  assert(s.stations.includes('Chicago') && !s.stations.includes('Auckland'));
 });
 
 test('setup distribution', () => {
@@ -302,17 +302,17 @@ test('virulent strain: complex molecular structure, government interference, chr
 test('virulent strain: immediate effects', () => {
   let s = fresh(['scientist', 'medic'], [], { virulent: true });
   s.virulent = 'blue';
-  put(s, 'Paris', 'blue', 1); put(s, 'Essen', 'blue', 1); put(s, 'Milan', 'blue', 2);
+  put(s, 'Paris', 'blue', 1); put(s, 'Copenhagen', 'blue', 1); put(s, 'Milan', 'blue', 2);
   s.playerDeck.push('Lima', 'EPIDEMIC-VS:uncountedPopulations');
-  s.infectionDeck = s.infectionDeck.filter(c => c !== 'Sydney'); s.infectionDeck.unshift('Sydney');
+  s.infectionDeck = s.infectionDeck.filter(c => c !== 'Auckland'); s.infectionDeck.unshift('Auckland');
   s = E.apply(s, 0, { type: 'endActions' });
   s = E.apply(s, 0, { type: 'draw' });
-  assert.strictEqual(s.cubes['Paris'].blue, 2); assert.strictEqual(s.cubes['Essen'].blue, 2); assert.strictEqual(s.cubes['Milan'].blue, 2);
+  assert.strictEqual(s.cubes['Paris'].blue, 2); assert.strictEqual(s.cubes['Copenhagen'].blue, 2); assert.strictEqual(s.cubes['Milan'].blue, 2);
 
   s = fresh(['scientist', 'medic'], [], { virulent: true });
   s.virulent = 'red';
   s.playerDeck.push('Lima', 'EPIDEMIC-VS:unacceptableLoss');
-  s.infectionDeck = s.infectionDeck.filter(c => c !== 'Sydney'); s.infectionDeck.unshift('Sydney');
+  s.infectionDeck = s.infectionDeck.filter(c => c !== 'Auckland'); s.infectionDeck.unshift('Auckland');
   s = E.apply(s, 0, { type: 'endActions' });
   s = E.apply(s, 0, { type: 'draw' });
   assert.strictEqual(s.boxed.red, 4);
@@ -322,7 +322,7 @@ test('virulent strain: immediate effects', () => {
   s.virulent = 'blue'; s.cures.blue = 'eradicated';
   s.infectionDiscard = ['Paris', 'Cairo'];
   s.playerDeck.push('Lima', 'EPIDEMIC-VS:hiddenPocket');
-  s.infectionDeck = s.infectionDeck.filter(c => !['Sydney', 'Paris', 'Cairo'].includes(c)); s.infectionDeck.unshift('Sydney');
+  s.infectionDeck = s.infectionDeck.filter(c => !['Auckland', 'Paris', 'Cairo'].includes(c)); s.infectionDeck.unshift('Auckland');
   s = E.apply(s, 0, { type: 'endActions' });
   s = E.apply(s, 0, { type: 'draw' });
   assert.strictEqual(s.cures.blue, 'cured', 'no longer eradicated');
