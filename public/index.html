@@ -5,20 +5,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pandemic: On the Brink — Online</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%227%22 fill=%22%23d8433b%22/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <!-- Home -->
   <section id="home" class="screen hidden">
+    <svg id="homeMap" aria-hidden="true"></svg>
     <div class="home-card">
-      <h1>PANDEMIC <span>On the Brink</span></h1>
-      <p class="sub">Cooperative multiplayer for 2–5 players. Create a room and share the link with your team.</p>
-      <label>Your name <input id="nameInput" maxlength="20" placeholder="e.g. Alex"></label>
-      <button id="createBtn" class="primary">Create a new room</button>
-      <div class="or">or join an existing room</div>
-      <div class="row">
-        <input id="codeInput" maxlength="4" placeholder="CODE" class="code-input">
-        <button id="joinBtn">Join</button>
+      <div class="logo">PANDEMIC</div>
+      <div class="logo-sub">On the Brink · Online</div>
+      <div id="homeForm">
+        <p class="sub">Cooperative play for 2–5. Create a room, share the link, save the world together.</p>
+        <label>Your name <input id="nameInput" maxlength="20" placeholder="e.g. Alex" autocomplete="nickname"></label>
+        <button id="createBtn" class="primary big">Create a new room</button>
+        <div class="or"><span>or join a room</span></div>
+        <div class="row">
+          <input id="codeInput" maxlength="4" placeholder="CODE" class="code-input" autocomplete="off">
+          <button id="joinBtn">Join</button>
+        </div>
+        <p class="fine">The person who creates the room hosts the game in their browser — keep that tab open while you play.</p>
+      </div>
+      <div id="homeConnecting" class="hidden">
+        <div class="spinner"></div>
+        <p id="connectingText">Connecting…</p>
+        <button id="cancelConnect">Cancel</button>
       </div>
     </div>
   </section>
@@ -33,6 +45,13 @@
       <div id="mapwrap">
         <svg id="map"></svg>
         <div id="banner"></div>
+        <div id="tip" class="hidden"></div>
+        <div id="zoom">
+          <button data-zoom="in" title="Zoom in">+</button>
+          <button data-zoom="out" title="Zoom out">−</button>
+          <button data-zoom="reset" title="Reset view">⤢</button>
+        </div>
+        <div id="alert" class="hidden"></div>
       </div>
       <aside id="side">
         <div id="players"></div>
@@ -49,7 +68,10 @@
         </div>
       </aside>
     </main>
-    <footer id="actionbar"></footer>
+    <footer id="dock">
+      <div id="turnrow"></div>
+      <div id="myhand"></div>
+    </footer>
   </section>
 
   <div id="modal" class="hidden">
@@ -61,9 +83,11 @@
   </div>
   <div id="toast"></div>
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="/shared/data.js"></script>
-  <script src="/shared/engine.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+  <script src="shared/data.js"></script>
+  <script src="shared/engine.js"></script>
+  <script src="shared/room.js"></script>
+  <script src="net.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

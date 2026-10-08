@@ -3,24 +3,33 @@
 A multiplayer browser version of Pandemic (2nd edition rules) with the **On the Brink** roles and events.
 2–5 players, real-time, one shared board.
 
-## Run it
+## Play online (GitHub Pages)
+
+The site is fully static: the browser of whoever **creates the room is the host**. It runs the rules
+engine and relays the game to everyone else over WebRTC (peer-to-peer via [PeerJS](https://peerjs.com)).
+
+1. Open the site, enter your name, **Create a new room**.
+2. Send the invite link (`…/?room=CODE`) to your friends.
+3. Everyone picks a role (or Random); the host picks the difficulty and starts.
+
+- The host must keep their tab open. Refreshing is safe because the game is saved in the host's browser and everyone reconnects automatically.
+- Guests can refresh or drop out and rejoin from the same browser.
+- Very strict networks (some corporate or school firewalls) can block peer-to-peer connections.
+
+Deploys automatically: pushing to `main` runs the tests and publishes `public/` via `.github/workflows/pages.yml`
+(repo Settings → Pages → Source: **GitHub Actions**).
+
+## Develop locally
 
 ```bash
 npm install
-npm start            # http://localhost:3000  (PORT=xxxx to change)
-npm test             # rule tests + 300 random simulated games
+npm start            # http://localhost:3000 (static dev server)
+npm test             # rule scenarios + room tests + 300 random simulated games
 ```
-
-1. Open the site, enter your name, **Create a new room**.
-2. Send the invite link (`/?room=CODE`) to your friends.
-3. Everyone picks a role (or leaves it random); the host picks the difficulty and starts.
-
-Friends need to reach your server: same Wi-Fi → share `http://<your-LAN-IP>:3000`; remote → use a tunnel
-(e.g. `cloudflared tunnel --url http://localhost:3000`) or deploy to any Node host (Render, Fly.io, Railway…).
-Games live in memory, so restarting the server ends them. Refreshing or reconnecting is fine: your seat is kept.
+Open two browser windows (one normal, one incognito) to play against yourself.
 
 ## How to play
-- **Move**: click a highlighted city on the map. If there's more than one way to get there, you'll be asked which.
+- **Move**: click a highlighted city on the map. If there's more than one way to get there, you'll be asked which. Hover a city for details; scroll or use +/− to zoom, and drag to pan.
 - **Other actions**: buttons at the bottom (build, treat, share, cure, role abilities, pass, end actions).
 - **Events**: click a ★ card in your hand. Events can be played at any time, even on someone else's turn.
 - After actions: **Draw** → (epidemic pause for Resilient Population) → **Infect**.
@@ -42,11 +51,14 @@ Games live in memory, so restarting the server ends them. Refreshing or reconnec
 
 ## Layout
 ```
-shared/data.js     cities, connections, roles, events (used by server + browser)
-shared/engine.js   rules engine: pure state → state, validates every action
-server.js          Express + Socket.IO rooms; server is authoritative, hides deck order
-public/            UI (vanilla JS + SVG map, no build step)
-test/              rules.js (scenarios), sim.js (random games + invariants), e2e.js (socket smoke test)
+public/                 the whole site (served by GitHub Pages)
+  shared/data.js        cities, connections, roles, events
+  shared/engine.js      rules engine: pure state -> state, validates every action
+  shared/room.js        lobby/room logic (runs in the host's browser)
+  net.js                PeerJS transport: HostNet (authoritative) / GuestNet
+  app.js, style.css     UI (vanilla JS + SVG map, no build step)
+server.js               local static dev server only
+test/                   rules.js, room.js, sim.js
 ```
 
 Fan-made for private play. Pandemic is © Z-Man Games; please don't host this publicly.

@@ -39,6 +39,7 @@
   };
 
   function log(s, msg) {
+    s.logCount = (s.logCount || 0) + 1;
     s.log.push({ turn: s.turnNo, msg });
     if (s.log.length > 400) s.log.splice(0, s.log.length - 400);
   }

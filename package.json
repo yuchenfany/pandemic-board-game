@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/rules.js && node test/sim.js"
+    "test": "node test/rules.js && node test/room.js && node test/sim.js"
   },
   "license": "UNLICENSED",
   "private": true,

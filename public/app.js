@@ -1,10 +1,14 @@
-/* global io, PData, Engine */
+/* global PData, Engine, Room, HostNet, GuestNet */
 'use strict';
 const { CITIES, COLORS, COLOR_HEX, ROLES, EVENTS, DIFFICULTIES, EDGES, MAP_W, MAP_H } = PData;
 const CITY_NAMES = Object.keys(CITIES).sort();
+const ICON = { blue: '🔵', yellow: '🟡', black: '⚫', red: '🔴' };
 
-const socket = io();
-const ui = { room: null, game: null, you: -1, pawn: null, tab: 'log', chatSeen: 0, forecastFor: null };
+let net = null;
+const ui = {
+  room: null, game: null, you: -1, pawn: null, tab: 'log', chatSeen: 0, forecastFor: null,
+  logSeen: null, view: { x: 0, y: 0, w: MAP_W, h: MAP_H }, dragged: false,
+};
 const $ = (sel) => document.querySelector(sel);
 
 // ------------------------------------------------------------ DOM helpers
@@ -14,8 +18,9 @@ function h(tag, attrs, ...kids) {
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
     if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
-    else if (k === 'class') el.className = v;
+    else if (k === 'style' && typeof v === 'object') {
+      for (const [sk, sv] of Object.entries(v)) sk.startsWith('--') ? el.style.setProperty(sk, sv) : (el.style[sk] = sv);
+    } else if (k === 'class') el.className = v;
     else el.setAttribute(k, v === true ? '' : v);
   }
   kids.flat(Infinity).forEach(c => { if (c != null && c !== false) el.append(c instanceof Node ? c : String(c)); });
@@ -41,6 +46,10 @@ function toast(msg, kind = 'error') {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.className = ''; }, 3200);
 }
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch { /* blocked */ } },
+};
 
 // ------------------------------------------------------------ modal helpers
 
@@ -53,6 +62,7 @@ function openModal(title, body, buttons = []) {
 }
 function closeModal() { $('#modal').classList.add('hidden'); ui.forecastFor = null; }
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal' && !ui.forecastFor) closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !ui.forecastFor) closeModal(); });
 const cancelBtn = () => h('button', { onclick: closeModal }, 'Cancel');
 
 function openChoice(title, choices, note) {
@@ -85,69 +95,152 @@ function openForm(title, note, fields, onSubmit) {
   openModal(title, body, [cancelBtn(), ok]);
 }
 
-// ------------------------------------------------------------ networking
+// ------------------------------------------------------------ session & networking
 
 const SESSION_KEY = 'pandemic:session';
-const getSession = () => { try { return JSON.parse(localStorage.getItem(SESSION_KEY)); } catch { return null; } };
-const setSession = (v) => v ? localStorage.setItem(SESSION_KEY, JSON.stringify(v)) : localStorage.removeItem(SESSION_KEY);
+const getSession = () => store.get(SESSION_KEY);
+const setSession = (v) => store.set(SESSION_KEY, v);
+const inviteLink = (code) => `${location.origin}${location.pathname}?room=${code}`;
 
-function joined(res) {
-  if (res.error) {
-    toast(res.error);
-    setSession(null);
-    show('home');
-    return;
-  }
-  setSession({ code: res.code, token: res.token });
-  history.replaceState(null, '', `?room=${res.code}`);
+function wire(n) {
+  n.on('state', (data) => {
+    const prevTurn = ui.game && ui.game.turnNo;
+    ui.room = data.room; ui.game = data.game; ui.you = data.you;
+    if (ui.game && ui.game.turnNo !== prevTurn) ui.pawn = null;
+    render();
+  });
+  n.on('status', () => { renderConn(); if (ui.room) render(); });
+}
+
+function connectingScreen(text) {
+  show('home');
+  $('#homeForm').classList.add('hidden');
+  $('#homeConnecting').classList.remove('hidden');
+  $('#connectingText').textContent = text;
+}
+function homeScreen() {
+  show('home');
+  $('#homeForm').classList.remove('hidden');
+  $('#homeConnecting').classList.add('hidden');
+}
+
+function leaveRoom() {
+  if (net) net.close();
+  net = null;
+  setSession(null);
+  ui.room = ui.game = null; ui.you = -1; ui.logSeen = null;
+  history.replaceState(null, '', location.pathname);
+  homeScreen();
+}
+
+function hostNewRoom(name) {
+  const code = Room.newCode();
+  net = new HostNet(code, new Room(code));
+  wire(net);
+  net.start();
+  net.emit('join', { name }, (res) => {
+    setSession({ code, token: res.token, host: true });
+    history.replaceState(null, '', `?room=${code}`);
+  });
+}
+
+function resumeHosting(sess, saved) {
+  const room = new Room(sess.code, saved);
+  room.seats.forEach(seat => { seat.connected = seat.token === sess.token; });
+  net = new HostNet(sess.code, room);
+  net.myToken = sess.token;
+  wire(net);
+  net.start();
+  net.broadcast();
+}
+
+function joinRoom(code, joinData) {
+  net = new GuestNet(code);
+  wire(net);
+  connectingScreen(`Connecting to room ${code}…`);
+  net.on('status', ({ text }) => { if (!ui.room) $('#connectingText').textContent = text; });
+  net.join(joinData, (res) => {
+    if (res.error) {
+      toast(res.error);
+      if (!ui.room) leaveRoom();
+      return;
+    }
+    setSession({ code, token: res.token, host: false });
+    history.replaceState(null, '', `?room=${code}`);
+  });
 }
 
 function send(action) {
-  socket.emit('action', action, (res) => { if (res && res.error) toast(res.error); });
+  if (!net) return;
+  net.emit('action', action, (res) => { if (res && res.error) toast(res.error); });
 }
-
-socket.on('connect', () => {
-  const sess = getSession();
-  const urlRoom = new URLSearchParams(location.search).get('room');
-  if (sess && (!urlRoom || urlRoom.toUpperCase() === sess.code)) {
-    socket.emit('join', { code: sess.code, token: sess.token }, joined);
-  } else {
-    show('home');
-  }
-});
-
-socket.on('state', (data) => {
-  const prevTurn = ui.game && ui.game.turnNo;
-  ui.room = data.room; ui.game = data.game; ui.you = data.you;
-  if (ui.game && ui.game.turnNo !== prevTurn) ui.pawn = null;
-  render();
-});
+function req(ev, data) {
+  if (!net) return;
+  net.emit(ev, data, (res) => { if (res && res.error) toast(res.error); });
+}
 
 // ------------------------------------------------------------ home
 
-$('#nameInput').value = localStorage.getItem('pandemic:name') || '';
+$('#nameInput').value = store.get('pandemic:name') || '';
 $('#codeInput').value = new URLSearchParams(location.search).get('room') || '';
 const myName = () => {
   const n = $('#nameInput').value.trim();
-  if (!n) { toast('Enter your name first'); return null; }
-  localStorage.setItem('pandemic:name', n);
+  if (!n) { toast('Enter your name first'); $('#nameInput').focus(); return null; }
+  store.set('pandemic:name', n);
   return n;
 };
-$('#createBtn').onclick = () => { const name = myName(); if (name) socket.emit('create', { name }, joined); };
+$('#createBtn').onclick = () => { const name = myName(); if (name) hostNewRoom(name); };
 $('#joinBtn').onclick = () => {
   const name = myName();
   const code = $('#codeInput').value.trim().toUpperCase();
-  if (name && code) socket.emit('join', { code, name }, joined);
+  if (!code) { toast('Enter the room code'); return; }
+  if (name) joinRoom(code, { name });
 };
 $('#codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#joinBtn').click(); });
+$('#cancelConnect').onclick = leaveRoom;
+
+(function buildHomeMap() {
+  const svg = $('#homeMap');
+  svg.setAttribute('viewBox', `0 0 ${MAP_W} ${MAP_H}`);
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid slice');
+  EDGES.forEach(([a, b]) => {
+    const A = CITIES[a], B = CITIES[b];
+    if (Math.abs(A.x - B.x) < MAP_W / 2) svg.append(s('line', { x1: A.x, y1: A.y, x2: B.x, y2: B.y }));
+  });
+  Object.values(CITIES).forEach((c, i) => svg.append(s('circle', { cx: c.x, cy: c.y, r: 5, fill: COLOR_HEX[c.color], style: `animation-delay:${(i % 12) * 0.33}s` })));
+}());
+
+function boot() {
+  const sess = getSession();
+  const urlRoom = (new URLSearchParams(location.search).get('room') || '').toUpperCase();
+  if (sess && (!urlRoom || urlRoom === sess.code)) {
+    const saved = sess.host ? HostNet.savedRoom(sess.code) : null;
+    if (sess.host && saved) return resumeHosting(sess, saved);
+    if (!sess.host) return joinRoom(sess.code, { token: sess.token, name: store.get('pandemic:name') });
+    setSession(null);
+  }
+  homeScreen();
+  if (urlRoom) $('#nameInput').focus();
+}
 
 // ------------------------------------------------------------ render root
 
 function render() {
-  if (!ui.room || ui.you < 0) { show('home'); return; }
+  if (!ui.room || ui.you < 0) return;
   if (!ui.room.started || !ui.game) { renderLobby(); show('lobby'); return; }
   show('game');
   renderGame();
+}
+
+function connBadge() {
+  if (!net) return null;
+  const cls = net.status === 'online' ? 'dot on' : 'dot wait';
+  return h('span', { class: 'conn', title: net.statusText, style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+    h('span', { class: cls }), h('span', { class: 'muted small' }, net instanceof HostNet ? (net.status === 'online' ? 'Hosting' : net.statusText) : net.statusText));
+}
+function renderConn() {
+  const el = document.querySelector('[data-conn]');
+  if (el) { el.innerHTML = ''; const b = connBadge(); if (b) el.append(b); }
 }
 
 // ------------------------------------------------------------ lobby
@@ -155,89 +248,216 @@ function render() {
 function renderLobby() {
   const r = ui.room;
   const isHost = r.host === ui.you;
-  const taken = r.seats.map(x => x.role).filter(Boolean);
-  const link = `${location.origin}/?room=${r.code}`;
+  const link = inviteLink(r.code);
+  const mySeat = r.seats[ui.you];
+  const ownerOf = (role) => r.seats.findIndex(x => x.role === role);
 
-  const seats = r.seats.map((seat, i) => {
-    let roleCell;
-    if (i === ui.you) {
-      const sel = h('select', { onchange: (e) => socket.emit('pickRole', { role: e.target.value || null }, (res) => res && res.error && toast(res.error)) },
-        h('option', { value: '' }, 'Random role'),
-        Object.entries(ROLES).map(([k, ro]) => h('option', { value: k, disabled: taken.includes(k) && seat.role !== k }, ro.name + (ro.set === 'brink' ? ' (On the Brink)' : ''))));
-      sel.value = seat.role || '';
-      roleCell = sel;
-    } else {
-      roleCell = h('span', { class: 'muted' }, seat.role ? ROLES[seat.role].name : 'Random role');
-    }
-    return h('div', { class: 'seat' },
-      h('span', { class: 'dot' + (seat.connected ? ' on' : '') }),
-      h('span', { class: 'name' }, seat.name, i === ui.you ? ' (you)' : '', i === r.host ? h('span', { class: 'tag' }, 'host') : null),
-      roleCell);
-  });
+  const seats = r.seats.map((seat, i) => h('div', { class: 'seat' },
+    h('span', { class: 'dot' + (seat.connected ? ' on' : '') }),
+    h('span', { class: 'name' }, seat.name, i === ui.you ? h('span', { class: 'muted' }, ' (you)') : '', i === r.host ? h('span', { class: 'tag' }, 'host') : null),
+    h('span', { class: 'rolename' }, seat.role ? [h('span', { class: 'pawnchip', style: { background: ROLES[seat.role].color } }), ROLES[seat.role].name] : 'Random role')));
 
   const cfg = r.config;
-  const diffSel = h('select', { disabled: !isHost, onchange: (e) => socket.emit('config', { epidemics: Number(e.target.value) }) },
+  const diffSel = h('select', { disabled: !isHost, onchange: (e) => req('config', { epidemics: Number(e.target.value) }) },
     DIFFICULTIES.map(d => h('option', { value: d.epidemics }, `${d.name} — ${d.epidemics} epidemics`)));
   diffSel.value = cfg.epidemics;
-  const evSel = h('select', { disabled: !isHost, onchange: (e) => socket.emit('config', { eventsPerPlayer: Number(e.target.value) }) },
+  const evSel = h('select', { disabled: !isHost, onchange: (e) => req('config', { eventsPerPlayer: Number(e.target.value) }) },
     [0, 1, 2, 3].map(n => h('option', { value: n }, `${n} per player${n === 2 ? ' (recommended)' : ''}`)));
   evSel.value = cfg.eventsPerPlayer;
+
+  const roleCards = [
+    h('div', { class: 'role-card' + (!mySeat.role ? ' mine' : ''), style: { '--rc': '#6b7a8f' }, onclick: () => req('pickRole', { role: null }) },
+      h('div', { class: 'rn' }, '🎲 Random'), h('div', { class: 'rt' }, 'Get a random unused role when the game starts.')),
+    ...Object.entries(ROLES).map(([key, ro]) => {
+      const owner = ownerOf(key);
+      const mine = owner === ui.you, taken = owner >= 0 && !mine;
+      return h('div', { class: 'role-card' + (mine ? ' mine' : '') + (taken ? ' taken' : ''), style: { '--rc': ro.color },
+        onclick: () => !taken && req('pickRole', { role: mine ? null : key }) },
+      owner >= 0 ? h('span', { class: 'who' }, r.seats[owner].name) : null,
+      h('div', { class: 'rn' }, ro.name, ro.set === 'brink' ? h('span', { class: 'tag' }, 'Brink') : null),
+      h('div', { class: 'rt' }, ro.text));
+    }),
+  ];
 
   const lobby = $('#lobby');
   lobby.innerHTML = '';
   lobby.append(
+    h('div', { class: 'lobby-head' }, h('div', { class: 'logo' }, 'PANDEMIC'), h('span', { class: 'muted' }, 'Lobby'), h('div', { class: 'conn', 'data-conn': '' })),
     h('div', { class: 'lobby-grid' },
       h('div', { class: 'card' },
-        h('h2', null, 'Room'),
+        h('h2', null, 'Room code'),
         h('div', { class: 'room-code' }, r.code),
-        h('p', { class: 'muted small' }, 'Share this link with your team: ',
-          h('a', { class: 'link', onclick: () => { navigator.clipboard.writeText(link); toast('Invite link copied', 'info'); } }, link)),
+        h('div', { class: 'invite' },
+          h('input', { value: link, readonly: true, onclick: (e) => e.target.select() }),
+          h('button', { onclick: () => { navigator.clipboard.writeText(link).then(() => toast('Invite link copied', 'info')); } }, 'Copy link')),
         h('h2', null, `Players (${r.seats.length}/5)`),
         seats,
-        h('h2', { style: { marginTop: '16px' } }, 'Settings'),
+        h('h2', { style: { marginTop: '18px' } }, 'Settings'),
         h('label', null, 'Difficulty', diffSel),
         h('label', null, 'Event cards', evSel),
-        h('div', { class: 'row', style: { marginTop: '12px' } },
-          isHost ? h('button', { class: 'primary', disabled: r.seats.length < 2, onclick: () => socket.emit('start', null, (res) => res && res.error && toast(res.error)) },
-            r.seats.length < 2 ? 'Need at least 2 players' : 'Start game') : h('span', { class: 'muted' }, 'Waiting for the host to start…'),
-          h('button', { onclick: () => { socket.emit('leave'); setSession(null); history.replaceState(null, '', '/'); ui.room = null; show('home'); } }, 'Leave'))),
+        h('div', { class: 'row', style: { marginTop: '14px' } },
+          isHost ? h('button', { class: 'primary big', style: { flex: '1' }, disabled: r.seats.length < 2, onclick: () => req('start') },
+            r.seats.length < 2 ? 'Waiting for players…' : 'Start game') : h('span', { class: 'muted', style: { flex: '1' } }, 'Waiting for the host to start…'),
+          h('button', { onclick: () => {
+            if (isHost && !confirm('Close this room for everyone?')) return;
+            if (isHost) return leaveRoom();
+            req('leave');
+            setTimeout(leaveRoom, 300);
+          } }, 'Leave')),
+        isHost ? h('p', { class: 'fine' }, 'You are hosting: the game runs in this tab. Keep it open (refreshing is fine).') : null),
       h('div', { class: 'card' },
-        h('h2', null, 'Roles'),
-        h('div', { class: 'role-list' }, Object.values(ROLES).map(ro => h('div', null,
-          h('b', null, h('span', { class: 'pawnchip', style: { background: ro.color } }), ro.name), ro.set === 'brink' ? h('span', { class: 'tag' }, 'On the Brink') : null,
-          h('div', { class: 'muted small' }, ro.text)))))));
+        h('h2', null, 'Choose your role'),
+        h('div', { class: 'roles-grid' }, roleCards))));
+  renderConn();
 }
 
 // ------------------------------------------------------------ map
 
 let mapBuilt = false;
+const edgeEls = {};
+const pawnEls = [];
+
 function buildMap() {
   const svg = $('#map');
-  svg.setAttribute('viewBox', `0 0 ${MAP_W} ${MAP_H}`);
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  const defs = s('defs');
+  COLORS.forEach(c => defs.append(s('radialGradient', { id: `glow-${c}` },
+    s('stop', { offset: '0%', 'stop-color': COLOR_HEX[c], 'stop-opacity': 0.16 }),
+    s('stop', { offset: '100%', 'stop-color': COLOR_HEX[c], 'stop-opacity': 0 }))));
+  const bg = s('g');
+  for (let x = 0; x <= MAP_W; x += 62) bg.append(s('line', { class: 'grat', x1: x, y1: 0, x2: x, y2: MAP_H }));
+  for (let y = 0; y <= MAP_H; y += 55) bg.append(s('line', { class: 'grat', x1: 0, y1: y, x2: MAP_W, y2: y }));
+  // Soft regional glows behind each disease's cities
+  COLORS.forEach(c => {
+    const pts = Object.values(CITIES).filter(v => v.color === c);
+    const cx = pts.reduce((t, p) => t + p.x, 0) / pts.length, cy = pts.reduce((t, p) => t + p.y, 0) / pts.length;
+    const r = Math.max(...pts.map(p => Math.hypot(p.x - cx, p.y - cy))) + 70;
+    bg.append(s('circle', { cx, cy, r, fill: `url(#glow-${c})` }));
+  });
+
   const edges = s('g');
+  const addEdge = (a, b, attrs) => {
+    const el = s('line', { class: 'edge', ...attrs });
+    edges.append(el);
+    (edgeEls[a] = edgeEls[a] || []).push(el);
+    (edgeEls[b] = edgeEls[b] || []).push(el);
+  };
   EDGES.forEach(([a, b]) => {
     const A = CITIES[a], B = CITIES[b];
     if (Math.abs(A.x - B.x) > MAP_W / 2) {
-      // Wrap around the Pacific
       const [w, e] = A.x < B.x ? [A, B] : [B, A];
-      edges.append(s('line', { class: 'edge', x1: w.x, y1: w.y, x2: e.x - MAP_W, y2: e.y }));
-      edges.append(s('line', { class: 'edge', x1: e.x, y1: e.y, x2: w.x + MAP_W, y2: w.y }));
+      addEdge(a, b, { x1: w.x, y1: w.y, x2: e.x - MAP_W, y2: e.y });
+      addEdge(a, b, { x1: e.x, y1: e.y, x2: w.x + MAP_W, y2: w.y });
     } else {
-      edges.append(s('line', { class: 'edge', x1: A.x, y1: A.y, x2: B.x, y2: B.y }));
+      addEdge(a, b, { x1: A.x, y1: A.y, x2: B.x, y2: B.y });
     }
   });
   const cities = s('g');
   Object.entries(CITIES).forEach(([name, c]) => {
-    const g = s('g', { class: 'city', 'data-city': name, transform: `translate(${c.x},${c.y})`, onclick: () => onCityClick(name) },
-      s('circle', { class: 'ring', r: 15 }),
-      s('circle', { class: 'dotc', r: 9, fill: COLOR_HEX[c.color] }),
-      s('text', { y: 23 }, name),
-      s('title', null, name));
+    const g = s('g', { class: 'city', 'data-city': name, transform: `translate(${c.x},${c.y})`,
+      onclick: () => { if (!ui.dragged) onCityClick(name); },
+      onmouseenter: () => showTip(name), onmouseleave: hideTip },
+    s('circle', { class: 'hit', r: 18, fill: 'transparent' }),
+    s('circle', { class: 'ring', r: 15 }),
+    s('circle', { class: 'dotc', r: 9, fill: COLOR_HEX[c.color] }),
+    s('text', { y: 24 }, name));
     cities.append(g);
   });
-  svg.append(edges, cities, s('g', { id: 'dyn', class: 'dyn' }));
+  svg.append(defs, bg, edges, s('g', { id: 'dyn', class: 'dyn' }), cities, s('g', { id: 'pawns' }));
+  setupPanZoom(svg);
+  applyView();
   mapBuilt = true;
+}
+
+function applyView() {
+  const v = ui.view;
+  $('#map').setAttribute('viewBox', `${v.x} ${v.y} ${v.w} ${v.h}`);
+}
+function clampView() {
+  const v = ui.view;
+  v.w = Math.min(MAP_W, Math.max(MAP_W / 4, v.w));
+  v.h = v.w * MAP_H / MAP_W;
+  v.x = Math.min(MAP_W - v.w, Math.max(0, v.x));
+  v.y = Math.min(MAP_H - v.h, Math.max(0, v.y));
+}
+function zoomAt(factor, px, py) {
+  const v = ui.view;
+  const nw = Math.min(MAP_W, Math.max(MAP_W / 4, v.w * factor));
+  const k = nw / v.w;
+  v.x = px - (px - v.x) * k;
+  v.y = py - (py - v.y) * k;
+  v.w = nw;
+  clampView();
+  applyView();
+}
+function setupPanZoom(svg) {
+  const toSvg = (cx, cy) => {
+    const pt = new DOMPoint(cx, cy).matrixTransform(svg.getScreenCTM().inverse());
+    return pt;
+  };
+  svg.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const p = toSvg(e.clientX, e.clientY);
+    zoomAt(e.deltaY > 0 ? 1.15 : 1 / 1.15, p.x, p.y);
+  }, { passive: false });
+  let drag = null;
+  svg.addEventListener('pointerdown', (e) => {
+    drag = { x: e.clientX, y: e.clientY, vx: ui.view.x, vy: ui.view.y, moved: false, id: e.pointerId };
+    ui.dragged = false;
+  });
+  svg.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+    if (!drag.moved) { drag.moved = true; svg.setPointerCapture(drag.id); svg.classList.add('dragging'); hideTip(); }
+    const rect = svg.getBoundingClientRect();
+    const scale = Math.max(ui.view.w / rect.width, ui.view.h / rect.height);
+    ui.view.x = drag.vx - dx * scale;
+    ui.view.y = drag.vy - dy * scale;
+    clampView();
+    applyView();
+  });
+  const end = () => {
+    if (drag && drag.moved) { ui.dragged = true; setTimeout(() => { ui.dragged = false; }, 50); }
+    drag = null;
+    svg.classList.remove('dragging');
+  };
+  svg.addEventListener('pointerup', end);
+  svg.addEventListener('pointercancel', end);
+  document.querySelectorAll('#zoom button').forEach(b => b.addEventListener('click', () => {
+    const v = ui.view;
+    if (b.dataset.zoom === 'reset') { Object.assign(v, { x: 0, y: 0, w: MAP_W, h: MAP_H }); applyView(); return; }
+    zoomAt(b.dataset.zoom === 'in' ? 1 / 1.3 : 1.3, v.x + v.w / 2, v.y + v.h / 2);
+  }));
+}
+
+function showTip(city) {
+  (edgeEls[city] || []).forEach(e => e.classList.add('hot'));
+  const g = ui.game;
+  if (!g) return;
+  const c = CITIES[city];
+  const cubes = COLORS.filter(col => g.cubes[city][col]).map(col => `${ICON[col]} ${g.cubes[city][col]}`).join('  ');
+  const here = g.players.filter(p => p.location === city).map(p => p.name);
+  const tip = $('#tip');
+  tip.innerHTML = '';
+  tip.append(
+    h('b', null, city), ' ', h('span', { class: 'muted' }, `· ${c.color}`),
+    h('div', null, cubes || h('span', { class: 'muted' }, 'No disease cubes')),
+    g.stations.includes(city) ? h('div', null, '🏥 Research station') : null,
+    here.length ? h('div', null, '👤 ', here.join(', ')) : null,
+    h('div', { class: 'muted small' }, 'Connects to: ', PData.ADJ[city].join(', ')));
+  const wrap = $('#mapwrap').getBoundingClientRect();
+  const el = document.querySelector(`[data-city="${CSS.escape(city)}"] .dotc`).getBoundingClientRect();
+  let x = el.right - wrap.left + 12, y = el.top - wrap.top - 6;
+  tip.classList.remove('hidden');
+  if (x + tip.offsetWidth > wrap.width - 8) x = el.left - wrap.left - tip.offsetWidth - 12;
+  if (y + tip.offsetHeight > wrap.height - 8) y = wrap.height - tip.offsetHeight - 8;
+  tip.style.left = `${Math.max(8, x)}px`;
+  tip.style.top = `${Math.max(8, y)}px`;
+}
+function hideTip() {
+  document.querySelectorAll('#map .edge.hot').forEach(e => e.classList.remove('hot'));
+  $('#tip').classList.add('hidden');
 }
 
 function renderMap(g) {
@@ -258,28 +478,46 @@ function renderMap(g) {
   dyn.innerHTML = '';
   Object.entries(CITIES).forEach(([name, c]) => {
     if (g.stations.includes(name)) {
-      dyn.append(s('path', { d: `M${c.x - 27} ${c.y + 2} l7 -7 l7 7 v7 h-14 z`, fill: '#fff', stroke: '#000', 'stroke-width': 1 }));
+      dyn.append(s('g', { transform: `translate(${c.x - 27},${c.y - 4})` },
+        s('path', { d: 'M0 4 L7 -3 L14 4 V12 H0 Z', fill: '#fff', stroke: '#000', 'stroke-width': 1 }),
+        s('path', { d: 'M5.5 5 h3 v2 h2 v3 h-2 v2 h-3 v-2 h-2 v-3 h2 z', fill: '#d8433b', transform: 'scale(.8) translate(1.8,1)' })));
     }
     let row = 0;
     COLORS.forEach(col => {
       const n = g.cubes[name][col];
       if (!n) return;
       for (let k = 0; k < n; k++) {
-        dyn.append(s('rect', { x: c.x + 12 + k * 10, y: c.y - 16 + row * 11, width: 9, height: 9, rx: 1.5,
-          fill: COLOR_HEX[col], stroke: '#000', 'stroke-width': 1 }));
+        const x = c.x + 12 + k * 10, y = c.y - 17 + row * 11;
+        dyn.append(s('rect', { x, y, width: 9, height: 9, rx: 1.5, fill: COLOR_HEX[col], stroke: 'rgba(0,0,0,.7)', 'stroke-width': 1 }));
+        dyn.append(s('rect', { x: x + 1, y: y + 1, width: 7, height: 2.5, rx: 1, fill: '#fff', opacity: 0.35 }));
       }
       row++;
     });
   });
+
+  // Pawns are persistent so CSS can animate them between cities.
+  const layer = $('#pawns');
+  while (pawnEls.length < g.players.length) {
+    const i = pawnEls.length;
+    const bob = s('g', { class: 'bob' },
+      s('path', { d: 'M0 0 C-5 -7 -8 -11 -8 -16 A8 8 0 1 1 8 -16 C8 -11 5 -7 0 0 Z', stroke: '#000', 'stroke-width': 1.3 }),
+      s('text', { y: -13 }, ''));
+    const el = s('g', { class: 'pawn' }, bob);
+    layer.append(el);
+    pawnEls.push(el);
+  }
   const byCity = {};
   g.players.forEach((p, i) => (byCity[p.location] = byCity[p.location] || []).push(i));
-  Object.entries(byCity).forEach(([city, idxs]) => {
-    const c = CITIES[city];
-    idxs.forEach((i, k) => {
-      const x = c.x - ((idxs.length - 1) * 11) / 2 + k * 11;
-      dyn.append(s('circle', { class: 'pawn' + (i === g.current ? ' current' : ''), cx: x, cy: c.y - 22, r: 6,
-        fill: ROLES[g.players[i].role].color, stroke: '#000', 'stroke-width': 1.5 }));
-    });
+  g.players.forEach((p, i) => {
+    const el = pawnEls[i];
+    const group = byCity[p.location];
+    const k = group.indexOf(i);
+    const c = CITIES[p.location];
+    const x = c.x - ((group.length - 1) * 15) / 2 + k * 15;
+    el.style.transform = `translate(${x}px, ${c.y - 9}px)`;
+    el.classList.toggle('current', i === g.current);
+    el.querySelector('path').setAttribute('fill', ROLES[p.role].color);
+    el.querySelector('text').textContent = p.name.slice(0, 1).toUpperCase();
   });
 }
 
@@ -294,21 +532,72 @@ function selectedPawn(g) {
 function onCityClick(city) {
   const g = ui.game;
   if (!g) return;
-  const cubes = COLORS.filter(c => g.cubes[city][c]).map(c => `${g.cubes[city][c]} ${c}`).join(', ') || 'no cubes';
-  const info = `${city} (${CITIES[city].color}) — ${cubes}${g.stations.includes(city) ? ', research station' : ''}`;
-  if (g.current !== ui.you || g.turn.phase !== 'actions' || g.status !== 'playing') { toast(info, 'info'); return; }
+  if (g.current !== ui.you || g.turn.phase !== 'actions' || g.status !== 'playing') return;
   const pawn = selectedPawn(g);
   const opts = Engine.getMoveOptions(g, ui.you, pawn, city);
-  if (!opts.length) { toast(info, 'info'); return; }
+  if (!opts.length) { toast(`Can't reach ${city} from ${g.players[pawn].location} with one action`, 'info'); return; }
   const go = (o, card) => send({ type: 'move', pawn, to: city, method: o.method, card });
   const choices = [];
   opts.forEach(o => {
-    if (o.method === 'ops') o.cards.forEach(card => choices.push({ label: `Operations Expert move (discard ${card})`, onClick: () => go(o, card) }));
-    else choices.push({ label: o.label, onClick: () => go(o) });
+    if (o.method === 'ops') o.cards.forEach(card => choices.push({ label: `🛠 Operations Expert move (discard ${card})`, onClick: () => go(o, card) }));
+    else choices.push({ label: { drive: '🚗 ', direct: '✈️ ', charter: '🛩 ', shuttle: '🏥 ', dispatch: '📡 ', troubleshooter: '🔧 ' }[o.method] + o.label, onClick: () => go(o) });
   });
   const free = opts.find(o => o.method === 'drive' || o.method === 'shuttle' || o.method === 'dispatch');
   if (free && opts.length === 1) { go(free); return; }
-  openChoice(`Move ${g.players[pawn].name} to ${city}`, choices, info);
+  openChoice(`Move ${g.players[pawn].name} to ${city}`, choices);
+}
+
+// ------------------------------------------------------------ alerts from new log entries
+
+function processLog(g) {
+  const count = g.logCount || g.log.length;
+  if (ui.logSeen == null || count < ui.logSeen) { ui.logSeen = count; return; }
+  const fresh = g.log.slice(Math.max(0, g.log.length - (count - ui.logSeen)));
+  ui.logSeen = count;
+  const alerts = [];
+  fresh.forEach((e, i) => {
+    let m;
+    if (/drew an EPIDEMIC/.test(e.msg)) {
+      const next = fresh[i + 1] && fresh[i + 1].msg.match(/^Infect (.+?) \(/);
+      alerts.push({ big: 'EPIDEMIC', sub: next ? `${next[1]} is hit with 3 cubes` : e.msg, cls: '' });
+    } else if ((m = e.msg.match(/^OUTBREAK in (.+?) \(/))) {
+      flashCity(m[1], 'flash');
+      if (!alerts.some(a => a.big === 'OUTBREAK')) alerts.push({ big: 'OUTBREAK', sub: `${m[1]} — outbreaks ${g.outbreaks}/8`, cls: '' });
+    } else if ((m = e.msg.match(/^Infect (.+?) \(/))) {
+      flashCity(m[1], 'hitpulse');
+    } else if ((m = e.msg.match(/discovered a cure for (\w+)/))) {
+      alerts.push({ big: 'CURE FOUND', sub: `${m[1]} disease cured`, cls: 'good' });
+    } else if ((m = e.msg.match(/The (\w+) disease has been ERADICATED/))) {
+      alerts.push({ big: 'ERADICATED', sub: `${m[1]} is gone for good`, cls: 'good' });
+    } else if (/^--- /.test(e.msg) && e.msg.includes(g.players[ui.you].name + "'s turn")) {
+      alerts.push({ big: 'YOUR TURN', sub: '', cls: 'warn' });
+    }
+  });
+  showAlerts(alerts);
+}
+function flashCity(city, cls) {
+  const el = document.querySelector(`#map [data-city="${CSS.escape(city)}"]`);
+  if (!el) return;
+  el.classList.remove(cls);
+  void el.getBoundingClientRect();
+  el.classList.add(cls);
+  setTimeout(() => el.classList.remove(cls), 2200);
+}
+let alertQueue = [], alertBusy = false;
+function showAlerts(list) {
+  alertQueue.push(...list);
+  if (alertBusy) return;
+  const next = () => {
+    const a = alertQueue.shift();
+    const box = $('#alert');
+    if (!a) { alertBusy = false; box.classList.add('hidden'); return; }
+    alertBusy = true;
+    box.innerHTML = '';
+    box.append(h('div', { class: 'box ' + a.cls }, h('div', { class: 'big' }, a.big), a.sub ? h('div', null, a.sub) : null));
+    box.classList.remove('hidden');
+    setTimeout(next, 2400);
+  };
+  next();
 }
 
 // ------------------------------------------------------------ game render
@@ -319,7 +608,7 @@ const chip = (card, opts = {}) => {
     return h('span', { class: 'chip event' + (opts.onclick ? ' clickable' : ''), title: ev.text, onclick: opts.onclick }, '★ ' + ev.name);
   }
   const col = CITIES[card] ? CITIES[card].color : 'black';
-  return h('span', { class: `chip ${col}` + (opts.onclick ? ' clickable' : ''), style: { background: COLOR_HEX[col] }, onclick: opts.onclick, title: opts.title }, card);
+  return h('span', { class: `chip ${col}` + (opts.onclick ? ' clickable' : ''), style: { background: COLOR_HEX[col] }, onclick: opts.onclick }, card);
 };
 
 function renderGame() {
@@ -328,9 +617,11 @@ function renderGame() {
   renderMap(g);
   renderPlayers(g);
   renderBanner(g);
-  renderActions(g);
+  renderTurnRow(g);
+  renderHand(g);
   renderLog(g);
   renderChat();
+  processLog(g);
   maybeOpenForecast(g);
 }
 
@@ -338,188 +629,243 @@ function renderTopbar(g) {
   const top = $('#topbar');
   top.innerHTML = '';
   const rates = Engine.RATES;
-  top.append(...[
-    h('div', { class: 'stat' }, h('b', null, 'PANDEMIC'), h('span', { class: 'tag' }, ui.room.code)),
+  top.append(
+    h('div', { class: 'brand' }, 'PANDEMIC', h('span', { class: 'tag' }, ui.room.code)),
     h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Outbreaks'),
-      h('div', { class: 'track' }, Array.from({ length: 8 }, (_, i) => h('span', { class: i < g.outbreaks ? 'on' : '' }, i + 1)))),
+      h('div', { class: 'track ob' }, Array.from({ length: 8 }, (_, i) => h('span', { class: (i < g.outbreaks ? 'on' : '') + (i === 7 ? ' last' : '') }, i === 7 ? '☠' : i + 1)))),
     h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Infection rate'),
-      h('div', { class: 'track' }, rates.map((r, i) => h('span', { class: i === g.rateIdx ? 'cur' : '' }, r)))),
+      h('div', { class: 'track rate' }, rates.map((r, i) => h('span', { class: i === g.rateIdx ? 'cur' : i < g.rateIdx ? 'past' : '' }, r)))),
     h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Cures'),
-      COLORS.map(c => h('span', { class: 'cure', title: `${c}: ${g.cures[c]}`,
-        style: { borderColor: COLOR_HEX[c], background: g.cures[c] === 'none' ? 'transparent' : COLOR_HEX[c], color: c === 'yellow' ? '#222' : '#fff' } },
-      g.cures[c] === 'cured' ? '✓' : g.cures[c] === 'eradicated' ? '✕' : ''))),
-    h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Cubes left'),
-      COLORS.map(c => h('span', null, h('span', { class: 'cube', style: { background: COLOR_HEX[c] } }), ' ', g.supply[c], ' '))),
-    h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Player deck'), `${g.playerDeckCount} (${g.epidemicsLeft} epidemic${g.epidemicsLeft === 1 ? '' : 's'})`),
-    h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Stations'), `${g.stations.length}/${Engine.MAX_STATIONS}`),
-    h('div', { class: 'stat' },
-      h('a', { class: 'link', onclick: () => showPile('Player discard pile', g.playerDiscard) }, `Player discards (${g.playerDiscard.length})`), ' · ',
-      h('a', { class: 'link', onclick: () => showPile('Infection discard pile', g.infectionDiscard) }, `Infection discards (${g.infectionDiscard.length})`), ' · ',
-      h('a', { class: 'link', onclick: showHelp }, 'Help')),
-    g.quietNight ? h('span', { class: 'tag' }, 'One Quiet Night active') : null,
-    g.travelBan != null ? h('span', { class: 'tag' }, 'Commercial Travel Ban') : null,
-  ].filter(Boolean));
+      COLORS.map(c => h('span', { class: 'vial ' + g.cures[c], title: `${c}: ${g.cures[c]}`,
+        style: { borderColor: COLOR_HEX[c], background: g.cures[c] === 'none' ? 'transparent' : COLOR_HEX[c] } },
+      g.cures[c] === 'cured' ? '✓' : g.cures[c] === 'eradicated' ? '★' : ''))),
+    h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Cubes'),
+      h('div', { class: 'supply' }, COLORS.map(c => h('div', { class: 'bar' + (g.supply[c] <= 5 ? ' low' : '') },
+        h('div', { class: 'bg' }, h('i', { style: { width: `${(g.supply[c] / 24) * 100}%`, background: COLOR_HEX[c] } })), g.supply[c])))),
+    h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Deck'),
+      h('span', { title: 'Player cards left' }, `🂠 ${g.playerDeckCount}`),
+      h('span', { class: 'muted small' }, `${g.epidemicsLeft} epidemic${g.epidemicsLeft === 1 ? '' : 's'} left`)),
+    h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Stations'), `🏥 ${g.stations.length}/${Engine.MAX_STATIONS}`),
+    ...[g.quietNight ? h('span', { class: 'tag' }, '🌙 Quiet night') : null,
+      g.travelBan != null ? h('span', { class: 'tag' }, '🚫 Travel ban') : null].filter(Boolean),
+    h('div', { class: 'topbtns' },
+      h('span', { 'data-conn': '' }),
+      h('button', { onclick: () => showPile('Player discard pile', g.playerDiscard) }, `Discards (${g.playerDiscard.length})`),
+      h('button', { onclick: () => showPile('Infection discard pile', g.infectionDiscard) }, `Infected (${g.infectionDiscard.length})`),
+      h('button', { onclick: showHelp }, 'Help'),
+      h('button', { onclick: showMenu }, '⋯')),
+  );
+  renderConn();
+}
+
+function showMenu() {
+  const isHost = ui.room.host === ui.you;
+  const link = inviteLink(ui.room.code);
+  const choices = [{ label: '🔗 Copy invite link', onClick: () => navigator.clipboard.writeText(link).then(() => toast('Invite link copied', 'info')) }];
+  if (isHost) {
+    choices.push({ label: '↩ End this game and return to lobby', onClick: () => { if (confirm('End the current game for everyone?')) req('abandon'); } });
+    choices.push({ label: '✖ Close room', onClick: () => { if (confirm('Close the room? Everyone will be disconnected.')) leaveRoom(); } });
+  } else {
+    choices.push({ label: '✖ Leave (you can rejoin with the same browser)', onClick: () => { if (net) net.close(); net = null; ui.room = null; homeScreen(); } });
+  }
+  openChoice('Menu', choices, isHost ? 'You are the host: this tab runs the game. Refreshing is safe; closing it pauses the game for everyone.' : null);
 }
 
 function showPile(title, cards) {
-  openModal(title, h('div', { class: 'hand' }, cards.length ? cards.slice().reverse().map(c => chip(c)) : h('span', { class: 'muted' }, 'Empty')),
+  openModal(title, h('div', { class: 'pile' }, cards.length ? cards.slice().reverse().map(c => chip(c)) : h('span', { class: 'muted' }, 'Empty')),
     [h('button', { onclick: closeModal }, 'Close')]);
 }
 
 function showHelp() {
-  openModal('Reference', h('div', null,
-    h('p', { class: 'muted small' }, 'Click a highlighted city on the map to move there. Use the buttons at the bottom for other actions. ' +
-      'Click your ★ event cards to play them — events can be played at any time, even on other players\' turns.'),
+  openModal('How to play', h('div', { class: 'ref' },
+    h('p', { class: 'muted' }, 'On your turn take your actions, draw 2 cards, then infect cities. ',
+      'Click a highlighted city to move there (hover a city for details; scroll or use +/− to zoom, drag to pan). ',
+      'Click ★ event cards in your hand to play them — events work at any time, even on other players\' turns.'),
+    h('h4', null, 'Win / lose'),
+    h('div', null, 'Win by discovering all 4 cures. Lose at 8 outbreaks, if a color runs out of cubes, or when the player deck runs out.'),
     h('h4', null, 'Roles'),
-    Object.values(ROLES).map(r => h('div', { class: 'small', style: { marginBottom: '6px' } }, h('b', null, r.name), ' — ', r.text)),
+    Object.values(ROLES).map(r => h('div', null, h('b', { style: { color: r.color } }, r.name), ' — ', r.text)),
     h('h4', null, 'Events'),
-    Object.values(EVENTS).map(e => h('div', { class: 'small', style: { marginBottom: '6px' } }, h('b', null, e.name), ' — ', e.text))),
+    Object.values(EVENTS).map(e => h('div', null, h('b', null, e.name), ' — ', e.text))),
   [h('button', { onclick: closeModal }, 'Close')]);
 }
 
 function renderPlayers(g) {
   const box = $('#players');
   box.innerHTML = '';
-  const over = g.overLimit;
   g.players.forEach((p, i) => {
     const role = ROLES[p.role];
     const mine = i === ui.you;
-    const mustDiscard = over.includes(i);
     const seat = ui.room.seats[i];
-    const cards = p.hand.map(card => {
-      let onclick = null;
-      if (mine && g.status === 'playing') {
-        if (Engine.isEvent(card)) onclick = () => mustDiscard ? discardOrPlay(card) : playEventDialog(card, false);
-        else if (mustDiscard) onclick = () => send({ type: 'discard', card });
-      }
-      return chip(card, { onclick });
-    });
-    box.append(h('div', { class: 'player' + (i === g.current ? ' current' : '') },
+    const over = g.overLimit.includes(i);
+    box.append(h('div', { class: 'player' + (i === g.current ? ' current' : ''), style: { '--rc': role.color } },
       h('div', { class: 'hdr' },
         h('span', { class: 'pawnchip', style: { background: role.color } }),
-        h('span', { class: 'nm' }, p.name, mine ? ' (you)' : ''),
+        h('span', { class: 'nm' }, p.name, mine ? h('span', { class: 'muted' }, ' (you)') : ''),
+        i === g.current ? h('span', { class: 'turn-tag' }, 'TURN') : null,
         h('span', { class: 'dot' + (seat && seat.connected ? ' on' : ''), title: seat && seat.connected ? 'online' : 'offline' }),
         h('span', { class: 'loc' }, '📍 ', p.location)),
-      h('div', { class: 'role', title: role.text }, role.name, ' · ',
-        h('span', { class: mustDiscard ? 'over' : '' }, `${p.hand.length}/${g.handLimits[i]} cards`)),
-      h('div', { class: 'hand' }, cards,
-        p.stored ? [h('span', { class: 'muted small' }, 'Stored:'), chip(p.stored, { onclick: mine && g.status === 'playing' ? () => playEventDialog(p.stored, true) : null })] : null,
-        p.role === 'fieldOperative' ? h('span', { class: 'muted small' }, 'Samples: ',
-          COLORS.map(c => p.samples[c] ? [h('span', { class: 'cube', style: { background: COLOR_HEX[c] } }), `×${p.samples[c]} `] : null)) : null)));
+      h('div', { class: 'role', title: role.text }, h('b', null, role.name), ' · ',
+        h('span', { class: over ? 'over' : '' }, `${p.hand.length}/${g.handLimits[i]} cards`)),
+      h('div', { class: 'hand' },
+        p.hand.map(c => chip(c)),
+        p.stored ? [h('span', { class: 'muted small' }, 'Stored:'), chip(p.stored)] : null,
+        p.role === 'fieldOperative' && COLORS.some(c => p.samples[c]) ? h('span', { class: 'muted small' }, 'Samples: ',
+          COLORS.map(c => p.samples[c] ? `${ICON[c]}×${p.samples[c]} ` : null)) : null)));
   });
+}
+
+function renderHand(g) {
+  const box = $('#myhand');
+  box.innerHTML = '';
+  const me = g.players[ui.you];
+  const over = g.overLimit.includes(ui.you);
+  const playing = g.status === 'playing';
+  box.append(h('div', { class: 'label' }, h('b', null, 'Your hand'), `${me.hand.length}/${g.handLimits[ui.you]} cards`,
+    over ? h('span', { class: 'over' }, 'Discard!') : null));
+  const sorted = me.hand.slice().sort((a, b) => {
+    const ka = Engine.isEvent(a) ? 9 : COLORS.indexOf(CITIES[a].color), kb = Engine.isEvent(b) ? 9 : COLORS.indexOf(CITIES[b].color);
+    return ka - kb || a.localeCompare(b);
+  });
+  const cardEl = (card, stored) => {
+    const isEv = Engine.isEvent(card);
+    let onclick = null;
+    if (playing) {
+      if (isEv) onclick = () => (over && !stored) ? discardOrPlay(card) : playEventDialog(card, stored);
+      else if (over) onclick = () => send({ type: 'discard', card });
+    }
+    const title = isEv ? EVENTS[Engine.eventKey(card)].text : (over ? 'Click to discard' : `${CITIES[card].color} city card`);
+    return h('div', { class: 'pcard' + (isEv ? ' event' : '') + (onclick ? ' clickable' : '') + (over && !stored ? ' discard' : '') + (card === me.location ? ' here' : ''),
+      style: { '--c': isEv ? '#9c6a00' : COLOR_HEX[CITIES[card].color] }, title, onclick },
+    h('div', { class: 'cn' }, isEv ? '★ ' + EVENTS[Engine.eventKey(card)].name : card),
+    h('div', { class: 'cc' }, isEv ? (stored ? 'stored event' : 'event · play anytime') : CITIES[card].color));
+  };
+  sorted.forEach(c => box.append(cardEl(c, false)));
+  if (me.stored) box.append(cardEl(me.stored, true));
+  if (!me.hand.length && !me.stored) box.append(h('div', { class: 'label' }, h('span', { class: 'muted' }, 'No cards')));
+  // Cure progress
+  const need = Engine.cardsNeededForCure(me, false);
+  box.append(h('div', { class: 'cure-hint' }, COLORS.filter(c => g.cures[c] === 'none').map(c => {
+    const n = me.hand.filter(x => CITIES[x] && CITIES[x].color === c).length;
+    return h('div', { class: n >= need ? 'ok' : '' }, `${ICON[c]} ${n}/${need} for cure`);
+  })));
 }
 
 function discardOrPlay(card) {
   openChoice(Engine.cardName(card), [
-    { label: 'Play this event', onClick: () => playEventDialog(card, false) },
-    { label: 'Discard it', onClick: () => send({ type: 'discard', card }) },
+    { label: '★ Play this event', onClick: () => playEventDialog(card, false) },
+    { label: '🗑 Discard it', onClick: () => send({ type: 'discard', card }) },
   ]);
 }
 
 function renderBanner(g) {
   const b = $('#banner');
   b.innerHTML = '';
-  const msg = (text, cls = '') => b.append(h('div', { class: 'msg ' + cls }, text));
-  if (g.status === 'won') msg(['🎉 You won! ', g.result, ' ', ui.room.host === ui.you ? h('button', { onclick: () => socket.emit('backToLobby') }, 'Back to lobby') : null], 'good');
-  if (g.status === 'lost') msg(['☠ Game over — ', g.result, ' ', ui.room.host === ui.you ? h('button', { onclick: () => socket.emit('backToLobby') }, 'Back to lobby') : null], 'bad');
+  const msg = (kids, cls = '') => b.append(h('div', { class: 'msg ' + cls }, kids));
+  const backBtn = ui.room.host === ui.you ? h('button', { class: 'primary', onclick: () => req('backToLobby') }, 'Back to lobby') : null;
+  if (net && net.status !== 'online') msg(['📡 ', net.statusText], 'warn');
+  if (g.status === 'won') msg(['🎉 Victory! ', g.result, backBtn], 'good');
+  if (g.status === 'lost') msg(['☠ Game over — ', g.result, backBtn], 'bad');
   if (g.status !== 'playing') return;
-  if (g.interrupt) msg(`${g.players[g.interrupt.player].name} is rearranging the infection deck (Forecast)…`, 'warn');
+  if (g.interrupt) msg(`🔮 ${g.players[g.interrupt.player].name} is rearranging the infection deck (Forecast)…`, 'warn');
   g.overLimit.forEach(i => msg(i === ui.you
-    ? `You are over your hand limit (${g.players[i].hand.length}/${g.handLimits[i]}). Click cards in your hand to discard (or play events).`
-    : `Waiting for ${g.players[i].name} to discard down to ${g.handLimits[i]} cards…`, 'warn'));
-  if (g.peek) msg(['Troubleshooter sees the next infections: ', g.peek.map(c => chip(c))]);
+    ? `✋ You're over your hand limit (${g.players[i].hand.length}/${g.handLimits[i]}). Click cards in your hand to discard (or play events).`
+    : `⏳ Waiting for ${g.players[i].name} to discard down to ${g.handLimits[i]} cards…`, 'warn'));
+  if (g.peek) msg(['🔧 Troubleshooter sees the next infections:', g.peek.map(c => chip(c))]);
   if (g.rvdColor && g.players.some(p => p.hand.includes('E:rapidVaccineDeployment') || p.stored === 'E:rapidVaccineDeployment')) {
-    msg('Rapid Vaccine Deployment can be played now (before the next action).', 'warn');
+    msg('💉 Rapid Vaccine Deployment can be played now (before the next action).', 'warn');
   }
-  if (g.turn.phase === 'epidemic') msg('Epidemic! Last chance to play Resilient Population before Intensify.', 'warn');
+  if (g.turn.phase === 'epidemic') msg('☣ Epidemic! Last chance to play Resilient Population before Intensify.', 'warn');
 }
 
-function renderActions(g) {
-  const bar = $('#actionbar');
+function renderTurnRow(g) {
+  const bar = $('#turnrow');
   bar.innerHTML = '';
   const cur = g.players[g.current];
   const me = g.players[ui.you];
-  const phaseText = { actions: `${g.turn.actionsLeft} action${g.turn.actionsLeft === 1 ? '' : 's'} left`, draw: 'drawing cards',
-    epidemic: 'resolving an epidemic', infect: 'infecting cities', over: 'game over' }[g.turn.phase];
-  bar.append(h('span', { class: 'status' }, g.current === ui.you ? 'Your turn' : `${cur.name}'s turn`, ` — ${phaseText}`));
-  if (g.status !== 'playing' || g.current !== ui.you) return;
-  const add = (...els) => bar.append(...els);
-  const btn = (label, onclick, opts = {}) => h('button', { onclick, disabled: opts.disabled, class: opts.class, title: opts.title, style: opts.style }, label);
   const ph = g.turn.phase;
+  const total = g.turn.actionsLeft + g.turn.actionsTaken;
+  const n = g.quietNight ? 0 : g.travelBan != null ? 1 : g.infectionRate;
+  bar.append(
+    h('span', { class: 'whose' }, h('span', { class: 'pawnchip', style: { background: ROLES[cur.role].color } }),
+      g.current === ui.you ? 'Your turn' : `${cur.name}'s turn`),
+    h('div', { class: 'stepper' },
+      h('span', { class: 'step' + (ph === 'actions' ? ' on' : '') }, 'Actions',
+        h('span', { class: 'pips' }, Array.from({ length: total }, (_, i) => h('i', { class: i < g.turn.actionsTaken ? 'used' : '' })))),
+      h('span', { class: 'arrow' }, '▶'),
+      h('span', { class: 'step' + (ph === 'draw' || ph === 'epidemic' ? ' on' : '') }, ph === 'epidemic' ? 'Epidemic!' : 'Draw 2'),
+      h('span', { class: 'arrow' }, '▶'),
+      h('span', { class: 'step' + (ph === 'infect' ? ' on' : '') }, `Infect ${n}`)));
+  if (g.status !== 'playing' || g.current !== ui.you) return;
 
-  if (ph === 'draw') add(btn('Draw 2 player cards', () => send({ type: 'draw' }), { class: 'primary' }));
-  if (ph === 'epidemic') add(btn('Continue: Intensify', () => send({ type: 'continue' }), { class: 'primary' }));
-  if (ph === 'infect') {
-    const n = g.quietNight ? 0 : g.travelBan != null ? 1 : g.infectionRate;
-    add(btn(n ? `Infect ${n} cit${n === 1 ? 'y' : 'ies'}` : 'Skip infection (One Quiet Night)', () => send({ type: 'infect' }), { class: 'primary' }));
-  }
+  const add = (...els) => bar.append(...els);
+  const btn = (icon, label, onclick, opts = {}) => h('button', { onclick, disabled: opts.disabled, class: 'act ' + (opts.class || ''), title: opts.title, style: opts.style },
+    h('span', { class: 'ic' }, icon), label);
+
+  if (ph === 'draw') add(btn('🂠', 'Draw 2 player cards', () => send({ type: 'draw' }), { class: 'primary' }));
+  if (ph === 'epidemic') add(btn('☣', 'Continue: Intensify', () => send({ type: 'continue' }), { class: 'primary' }));
+  if (ph === 'infect') add(btn('🦠', n ? `Infect ${n} cit${n === 1 ? 'y' : 'ies'}` : 'Skip infection (Quiet Night)', () => send({ type: 'infect' }), { class: 'primary' }));
   if (ph !== 'actions') return;
 
   const here = me.location;
-  // Pawn selector for Dispatcher / Special Orders
+  add(h('span', { class: 'sep' }));
   if (me.role === 'dispatcher' || g.turn.flags.specialOrders != null) {
     const allowed = g.players.map((p, i) => i).filter(i => me.role === 'dispatcher' || i === ui.you || i === g.turn.flags.specialOrders);
-    const sel = h('select', { onchange: (e) => { ui.pawn = Number(e.target.value); renderMap(g); } },
+    const sel = h('select', { title: 'Which pawn to move', onchange: (e) => { ui.pawn = Number(e.target.value); renderMap(g); } },
       allowed.map(i => h('option', { value: i }, `Move: ${g.players[i].name}`)));
     sel.value = selectedPawn(g);
     add(sel);
   }
-  add(h('span', { class: 'muted small' }, 'Click a highlighted city to move.'), h('span', { class: 'sep' }));
 
-  // Build
   const canBuild = !g.stations.includes(here) && (me.role === 'opsExpert' || me.hand.includes(here));
-  add(btn('Build station', () => {
+  add(btn('🏥', 'Build', () => {
     if (g.stations.length >= Engine.MAX_STATIONS) {
       openForm('Build research station', 'All 6 stations are built. Choose one to move here.',
         [{ name: 'remove', label: 'Remove station from', type: 'select', options: g.stations.map(c => [c, c]) }],
         (v) => send({ type: 'build', remove: v.remove }));
     } else send({ type: 'build' });
-  }, { disabled: !canBuild, title: me.role === 'opsExpert' ? 'No card needed' : `Discard ${here}` }));
+  }, { disabled: !canBuild, title: g.stations.includes(here) ? 'Already a station here' : me.role === 'opsExpert' ? 'No card needed' : `Discard ${here}` }));
 
-  // Treat
-  COLORS.filter(c => g.cubes[here][c] > 0).forEach(c => add(btn(`Treat ${c}`, () => send({ type: 'treat', color: c }),
-    { class: 'colorbtn', style: { borderColor: COLOR_HEX[c] } })));
+  COLORS.filter(c => g.cubes[here][c] > 0).forEach(c => add(btn('💉', `Treat ${c}`, () => send({ type: 'treat', color: c }),
+    { class: 'colorbtn', style: { '--c': COLOR_HEX[c] } })));
 
-  // Share
   const shares = Engine.getShareOptions(g, ui.you);
-  add(btn('Share knowledge', () => openChoice('Share knowledge', shares.map(o => ({
-    label: o.mode === 'give' ? `Give ${o.card} to ${g.players[o.other].name}` : `Take ${o.card} from ${g.players[o.other].name}`,
+  add(btn('🤝', 'Share', () => openChoice('Share knowledge', shares.map(o => ({
+    label: o.mode === 'give' ? `Give ${o.card} → ${g.players[o.other].name}` : `Take ${o.card} ← ${g.players[o.other].name}`,
     onClick: () => send({ type: 'share', ...o }),
-  }))), { disabled: !shares.length }));
+  }))), { disabled: !shares.length, title: 'Give or take the card matching your city with a player in the same city' }));
 
-  // Cure
   const cureColors = COLORS.filter(c => {
     if (g.cures[c] !== 'none' || !g.stations.includes(here)) return false;
-    const n = me.hand.filter(x => CITIES[x] && CITIES[x].color === c).length;
+    const cnt = me.hand.filter(x => CITIES[x] && CITIES[x].color === c).length;
     const samples = me.role === 'fieldOperative' && me.samples[c] >= 3;
-    return n >= Engine.cardsNeededForCure(me, false) || (samples && n >= Engine.cardsNeededForCure(me, true));
+    return cnt >= Engine.cardsNeededForCure(me, false) || (samples && cnt >= Engine.cardsNeededForCure(me, true));
   });
-  add(btn('Discover cure', () => cureDialog(g, cureColors), { disabled: !cureColors.length }));
+  add(btn('🧪', 'Cure', () => cureDialog(g, cureColors), { disabled: !cureColors.length, title: 'At a research station with enough cards of one color' }));
 
-  // Role-specific
   if (me.role === 'contingencyPlanner') {
     const evs = g.playerDiscard.filter(Engine.isEvent);
-    add(btn('Take discarded event', () => openChoice('Store an event', evs.map(c => ({ label: Engine.cardName(c), onClick: () => send({ type: 'contingencyTake', card: c }) }))),
+    add(btn('📋', 'Store event', () => openChoice('Store an event', evs.map(c => ({ label: Engine.cardName(c), onClick: () => send({ type: 'contingencyTake', card: c }) }))),
       { disabled: !evs.length || !!me.stored }));
   }
   if (me.role === 'archivist') {
-    add(btn(`Retrieve ${here}`, () => send({ type: 'archivistRetrieve' }), { disabled: g.turn.flags.archivist || !g.playerDiscard.includes(here) }));
+    add(btn('🗄', `Retrieve ${here}`, () => send({ type: 'archivistRetrieve' }), { disabled: g.turn.flags.archivist || !g.playerDiscard.includes(here) }));
   }
   if (me.role === 'fieldOperative') {
-    COLORS.filter(c => g.cubes[here][c] > 0).forEach(c => add(btn(`Sample ${c}`, () => send({ type: 'fieldSample', color: c }),
-      { disabled: g.turn.flags.sample, class: 'colorbtn', style: { borderColor: COLOR_HEX[c] } })));
+    COLORS.filter(c => g.cubes[here][c] > 0).forEach(c => add(btn('🧫', `Sample ${c}`, () => send({ type: 'fieldSample', color: c }),
+      { disabled: g.turn.flags.sample, class: 'colorbtn', style: { '--c': COLOR_HEX[c] } })));
   }
   if (me.role === 'epidemiologist') {
     const opts = [];
     g.players.forEach((q, qi) => { if (qi !== ui.you && q.location === here) q.hand.filter(Engine.isCity).forEach(c => opts.push({ qi, c })); });
-    add(btn('Take a card (free)', () => openChoice('Epidemiologist: take a City card', opts.map(o => ({
+    add(btn('🔬', 'Take card (free)', () => openChoice('Epidemiologist: take a City card', opts.map(o => ({
       label: `Take ${o.c} from ${g.players[o.qi].name}`, onClick: () => send({ type: 'epidemiologistTake', from: o.qi, card: o.c }),
     }))), { disabled: g.turn.flags.epidemiologist || !opts.length }));
   }
 
   add(h('span', { class: 'spacer' }),
-    btn('Pass action', () => send({ type: 'pass' })),
-    btn('End actions', () => openChoice('End your actions?', [{ label: `Yes, skip my remaining ${g.turn.actionsLeft} action(s)`, onClick: () => send({ type: 'endActions' }) }])));
+    btn('⏭', 'Pass', () => send({ type: 'pass' }), { class: 'ghost', title: 'Spend one action doing nothing' }),
+    btn('✋', 'End actions', () => openChoice('End your actions?', [{ label: `Yes, skip my remaining ${g.turn.actionsLeft} action(s)`, onClick: () => send({ type: 'endActions' }) }]), { class: 'ghost' }));
 }
 
 function cureDialog(g, colors) {
@@ -533,13 +879,13 @@ function cureDialog(g, colors) {
       h('p', { class: 'muted' }, `Select ${Engine.cardsNeededForCure(me, false)} cards` + (canSample ? ` (or ${Engine.cardsNeededForCure(me, true)} cards + 3 samples)` : '') + '.'),
       boxes.map(({ c, box }) => h('label', { class: 'check' }, box, chip(c))),
       sampleBox ? h('label', { class: 'check' }, sampleBox, 'Use 3 samples from my role card') : null);
-    openModal(`Discover a cure: ${color}`, body, [cancelBtn(), h('button', { class: 'primary', onclick: () => {
+    openModal(`🧪 Discover a cure: ${color}`, body, [cancelBtn(), h('button', { class: 'primary', onclick: () => {
       closeModal();
       send({ type: 'cure', color, cards: boxes.filter(b => b.box.checked).map(b => b.c), useSamples: !!(sampleBox && sampleBox.checked) });
     } }, 'Discover cure')]);
   };
   if (colors.length === 1) pickColor(colors[0]);
-  else openChoice('Which disease?', colors.map(c => ({ label: c, onClick: () => pickColor(c) })));
+  else openChoice('Which disease?', colors.map(c => ({ label: `${ICON[c]} ${c}`, onClick: () => pickColor(c) })));
 }
 
 // ------------------------------------------------------------ events
@@ -553,24 +899,25 @@ function playEventDialog(card, fromStored) {
   const cityOpts = CITY_NAMES.map(c => [c, c]);
   const withCubes = [];
   CITY_NAMES.forEach(c => COLORS.forEach(col => { if (g.cubes[c][col]) withCubes.push([`${c}|${col}`, `${c} — ${col} (${g.cubes[c][col]})`]); }));
+  const title = `★ ${ev.name}`;
 
   switch (key) {
     case 'airlift':
-      return openForm(ev.name, ev.text, [
+      return openForm(title, ev.text, [
         { name: 'pawn', label: 'Pawn', type: 'select', options: players, value: g.current },
         { name: 'to', label: 'Destination', type: 'select', options: cityOpts }],
       (v) => play({ pawn: Number(v.pawn), to: v.to }));
     case 'governmentGrant': {
       const fields = [{ name: 'city', label: 'City', type: 'select', options: cityOpts.filter(([c]) => !g.stations.includes(c)) }];
       if (g.stations.length >= Engine.MAX_STATIONS) fields.push({ name: 'remove', label: 'Remove station from', type: 'select', options: g.stations.map(c => [c, c]) });
-      return openForm(ev.name, ev.text, fields, (v) => play(v));
+      return openForm(title, ev.text, fields, (v) => play(v));
     }
     case 'resilientPopulation':
       if (!g.infectionDiscard.length) return toast('The infection discard pile is empty');
-      return openForm(ev.name, ev.text, [{ name: 'card', label: 'Infection card to remove', type: 'select', options: g.infectionDiscard.map(c => [c, c]) }], (v) => play(v));
+      return openForm(title, ev.text, [{ name: 'card', label: 'Infection card to remove', type: 'select', options: g.infectionDiscard.map(c => [c, c]) }], (v) => play(v));
     case 'newAssignment': {
       const unused = Object.entries(ROLES).filter(([k]) => !g.players.some(p => p.role === k)).map(([k, r]) => [k, r.name]);
-      return openForm(ev.name, ev.text, [
+      return openForm(title, ev.text, [
         { name: 'player', label: 'Player', type: 'select', options: players },
         { name: 'role', label: 'New role', type: 'select', options: unused }],
       (v) => play({ player: Number(v.player), role: v.role }));
@@ -579,14 +926,14 @@ function playEventDialog(card, fromStored) {
       const color = g.rvdColor;
       if (!color) return toast('Play this right after a cure is discovered');
       const cities = CITY_NAMES.filter(c => g.cubes[c][color] > 0);
-      return openForm(ev.name, `${ev.text} Color: ${color}. Cities must be connected to each other.`,
+      return openForm(title, `${ev.text} Color: ${color}. Cities must be connected to each other.`,
         cities.map(c => ({ name: c, label: `${c} (${g.cubes[c][color]} ${color})`, type: 'number', min: 0, max: g.cubes[c][color], value: 0 })),
         (v) => play({ removals: Object.entries(v).filter(([, n]) => n > 0).map(([city, n]) => ({ city, n })) }));
     }
     case 'reexaminedResearch': {
       const cards = g.playerDiscard.filter(Engine.isCity);
       if (!cards.length) return toast('No City cards in the discard pile');
-      return openForm(ev.name, ev.text, [
+      return openForm(title, ev.text, [
         { name: 'card', label: 'Card', type: 'select', options: cards.map(c => [c, c]) },
         { name: 'player', label: 'Give to', type: 'select', options: players, value: ui.you }],
       (v) => play({ card: v.card, player: Number(v.player) }));
@@ -594,34 +941,34 @@ function playEventDialog(card, fromStored) {
     case 'remoteTreatment': {
       if (!withCubes.length) return toast('There are no cubes on the board');
       const opts = [['', '— none —'], ...withCubes];
-      return openForm(ev.name, ev.text, [
+      return openForm(title, ev.text, [
         { name: 'a', label: 'First cube', type: 'select', options: withCubes },
         { name: 'b', label: 'Second cube (may be the same city)', type: 'select', options: opts, value: '' }],
       (v) => play({ removals: [v.a, v.b].filter(Boolean).map(x => { const [city, color] = x.split('|'); return { city, color }; }) }));
     }
     case 'specialOrders':
-      return openForm(ev.name, ev.text, [{ name: 'pawn', label: 'Pawn', type: 'select', options: players.filter(([i]) => i !== g.current) }],
+      return openForm(title, ev.text, [{ name: 'pawn', label: 'Pawn', type: 'select', options: players.filter(([i]) => i !== g.current) }],
         (v) => play({ pawn: Number(v.pawn) }));
     default:
-      return openChoice(ev.name, [{ label: `Play ${ev.name}`, onClick: () => play({}) }], ev.text);
+      return openChoice(title, [{ label: `Play ${ev.name}`, onClick: () => play({}) }], ev.text);
   }
 }
 
 function maybeOpenForecast(g) {
   if (!g.interrupt || g.interrupt.type !== 'forecast' || g.interrupt.player !== ui.you) return;
-  const id = g.log.length + ':' + g.interrupt.cards.join();
+  const id = (g.logCount || g.log.length) + ':' + g.interrupt.cards.join();
   if (ui.forecastFor === id) return;
   const order = g.interrupt.cards.slice();
   const list = h('div');
   const draw = () => {
     list.innerHTML = '';
     order.forEach((c, i) => list.append(h('div', { class: 'forecast-row' },
-      h('span', { class: 'n' }, i === 0 ? 'Top' : i + 1), chip(c),
+      h('span', { class: 'n' }, i === 0 ? 'Next' : `#${i + 1}`), chip(c),
       h('button', { disabled: i === 0, onclick: () => { [order[i - 1], order[i]] = [order[i], order[i - 1]]; draw(); } }, '↑'),
       h('button', { disabled: i === order.length - 1, onclick: () => { [order[i + 1], order[i]] = [order[i], order[i + 1]]; draw(); } }, '↓'))));
   };
   draw();
-  openModal('Forecast — arrange the infection deck', h('div', null, h('p', { class: 'muted' }, 'The first card is drawn next.'), list),
+  openModal('🔮 Forecast — arrange the infection deck', h('div', null, h('p', { class: 'muted' }, 'The first card is drawn next.'), list),
     [h('button', { class: 'primary', onclick: () => { closeModal(); send({ type: 'forecastOrder', order }); } }, 'Confirm order')]);
   ui.forecastFor = id;
 }
@@ -661,6 +1008,8 @@ document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click
 $('#chatForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const text = $('#chatInput').value.trim();
-  if (text) socket.emit('chat', { text });
+  if (text) req('chat', { text });
   $('#chatInput').value = '';
 });
+
+boot();
