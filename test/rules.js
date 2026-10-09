@@ -71,7 +71,7 @@ test('outbreak chain and outbreak counter', () => {
   s.travelBan = 1; // draw exactly one infection card
   s = E.apply(s, 0, { type: 'infect' });
   assert.strictEqual(s.outbreaks, 2, 'Paris -> London chain');
-  assert.strictEqual(s.cubes['Copenhagen'].blue, 2, 'Copenhagen gets one from each');
+  assert.strictEqual(s.cubes['Marburg'].blue, 2, 'Marburg gets one from each');
   assert.strictEqual(s.cubes['Madrid'].blue, 2);
   assert.strictEqual(s.cubes['Paris'].blue, 3);
   assert.strictEqual(s.current, 1, 'turn passed');
@@ -97,7 +97,7 @@ test('quarantine specialist and medic protect', () => {
 });
 
 test('cure, medic auto-treat, eradication, win', () => {
-  const blue = ['Austin', 'Chicago', 'Montreal', 'Boston', 'Washington'];
+  const blue = ['Austin', 'Chicago', 'Toronto', 'Boston', 'Washington'];
   let s = fresh(['scientist', 'medic'], [blue.slice(0, 4)]);
   s.cubes['Paris'].blue = 2; s.supply.blue -= 2; s.players[1].location = 'Paris';
   s.cures.yellow = s.cures.black = 'cured';
@@ -111,7 +111,7 @@ test('cure, medic auto-treat, eradication, win', () => {
 });
 
 test('non-scientist needs 5; field operative samples', () => {
-  const blue = ['Chicago', 'Montreal', 'Boston', 'Washington'];
+  const blue = ['Chicago', 'Toronto', 'Boston', 'Washington'];
   let s = fresh(['fieldOperative', 'medic'], [blue.slice()]);
   expectFail(() => E.apply(s, 0, { type: 'cure', color: 'blue', cards: blue }), /exactly 5/);
   s.cubes['Austin'].blue = 3; s.supply.blue -= 3;
@@ -221,7 +221,7 @@ test('events: forecast, grant, travel ban, borrowed time, RVD, remote treatment'
   s = E.apply(s, 0, { type: 'infect' });
   assert.strictEqual(s.infectionDiscard.length, before + 1, 'travel ban: 1 card');
 
-  const blue = ['Austin', 'Chicago', 'Montreal', 'Boston'];
+  const blue = ['Austin', 'Chicago', 'Toronto', 'Boston'];
   s = fresh(['scientist', 'medic'], [blue.slice(), ['E:rapidVaccineDeployment', 'E:remoteTreatment']]);
   s.cubes['Paris'].blue = 3; s.cubes['London'].blue = 2; s.cubes['Lima'].blue = 1; s.supply.blue -= 6;
   s = E.apply(s, 0, { type: 'cure', color: 'blue', cards: blue });
@@ -288,7 +288,7 @@ test('virulent strain: complex molecular structure, government interference, chr
   s = E.apply(s, 0, { type: 'move', to: 'Chicago', method: 'drive' });
   // Chronic: red city with no red cubes gets 2; Rate Effect draws 1 extra
   s = E.apply(s, 0, { type: 'endActions' });
-  s.playerDeck.push('Lima', 'Bogota');
+  s.playerDeck.push('Lima', 'Panama City');
   s = E.apply(s, 0, { type: 'draw' });
   s.infectionDeck = s.infectionDeck.filter(c => !['Manila', 'Cairo', 'Lagos', 'Paris'].includes(c));
   s.infectionDeck.push('Paris', 'Lagos', 'Cairo', 'Manila'); // top: Manila (red), Cairo, then Lagos (the extra), Paris untouched
@@ -302,12 +302,12 @@ test('virulent strain: complex molecular structure, government interference, chr
 test('virulent strain: immediate effects', () => {
   let s = fresh(['scientist', 'medic'], [], { virulent: true });
   s.virulent = 'blue';
-  put(s, 'Paris', 'blue', 1); put(s, 'Copenhagen', 'blue', 1); put(s, 'Milan', 'blue', 2);
+  put(s, 'Paris', 'blue', 1); put(s, 'Marburg', 'blue', 1); put(s, 'Athens', 'blue', 2);
   s.playerDeck.push('Lima', 'EPIDEMIC-VS:uncountedPopulations');
   s.infectionDeck = s.infectionDeck.filter(c => c !== 'Auckland'); s.infectionDeck.unshift('Auckland');
   s = E.apply(s, 0, { type: 'endActions' });
   s = E.apply(s, 0, { type: 'draw' });
-  assert.strictEqual(s.cubes['Paris'].blue, 2); assert.strictEqual(s.cubes['Copenhagen'].blue, 2); assert.strictEqual(s.cubes['Milan'].blue, 2);
+  assert.strictEqual(s.cubes['Paris'].blue, 2); assert.strictEqual(s.cubes['Marburg'].blue, 2); assert.strictEqual(s.cubes['Athens'].blue, 2);
 
   s = fresh(['scientist', 'medic'], [], { virulent: true });
   s.virulent = 'red';
@@ -345,7 +345,7 @@ test('mutation: mutation card, double infection, mutation events, purple cure an
   s.infectionDeck.push('Cairo', 'MUTATION1'); // top: mutation card, then Cairo
   put(s, 'Cairo', 'purple', 1);
   s = E.apply(s, 0, { type: 'endActions' });
-  s.playerDeck.push('Bogota', 'ME:intensifies');
+  s.playerDeck.push('Panama City', 'ME:intensifies');
   s = E.apply(s, 0, { type: 'draw' });
   assert(s.playerDiscard.includes('ME:intensifies') && !s.players[0].hand.includes('ME:intensifies'));
   s = E.apply(s, 0, { type: 'infect' });
