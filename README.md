@@ -12,6 +12,7 @@ engine and relays the game to everyone else over WebRTC (peer-to-peer via [PeerJ
 2. Send the invite link (`…/?room=CODE`) to your friends.
 3. Everyone picks a role (or Random); the host picks the difficulty and starts.
 
+- **Hotseat:** in the lobby, anyone can **Add player on this device** to control more than one role from a single screen. You can mix this with online players, or play solo with 2–5 roles and no one else. The screen switches to whichever of your players has to act. You can also switch by hand (buttons next to your hand, or click one of your players in the side panel), for example to play an event from another hand.
 - The host must keep their tab open. Refreshing is safe because the game is saved in the host's browser and everyone reconnects automatically.
 - Guests can refresh or drop out and rejoin from the same browser.
 - Very strict networks (some corporate or school firewalls) can block peer-to-peer connections.
@@ -26,7 +27,7 @@ npm install
 npm start            # http://localhost:3000 (static dev server)
 npm test             # rule scenarios + room tests + 300 random simulated games
 ```
-Open two browser windows (one normal, one incognito) to play against yourself.
+To test multiplayer locally, add hotseat players in the lobby, or open two browser windows (one normal, one incognito).
 
 ## How to play
 - **Move**: click a highlighted city on the map. If there's more than one way to get there, you'll be asked which. Hover a city for details; scroll or use +/− to zoom, and drag to pan.

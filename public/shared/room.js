@@ -36,16 +36,21 @@
 
     seat(token) { return this.seats.find(s => s.token === token); }
     seatIndex(token) { return this.seats.findIndex(s => s.token === token); }
+    // A connection controls its own seat plus any hotseat players it added on its device.
+    controls(token, i) {
+      const s = this.seats[i];
+      return !!s && !!token && (s.token === token || s.owner === token);
+    }
+    controlled(token) { return this.seats.map((_, i) => i).filter(i => this.controls(token, i)); }
 
     setConnected(token, on) {
-      const s = this.seat(token);
-      if (s) s.connected = on;
+      this.seats.forEach(s => { if (s.token === token || s.owner === token) s.connected = on; });
     }
 
     publicRoom() {
       return {
         code: this.code,
-        seats: this.seats.map(s => ({ name: s.name, role: s.role, connected: s.connected })),
+        seats: this.seats.map(s => ({ name: s.name, role: s.role, connected: s.connected, owner: s.owner ? this.seatIndex(s.owner) : -1 })),
         host: this.seatIndex(this.hostToken),
         config: this.config,
         started: !!this.game,
@@ -54,7 +59,7 @@
     }
 
     snapshot(token, gameView) {
-      return { room: this.publicRoom(), game: this.game ? (gameView || Engine.view(this.game)) : null, you: this.seatIndex(token) };
+      return { room: this.publicRoom(), game: this.game ? (gameView || Engine.view(this.game)) : null, you: this.seatIndex(token), mine: this.controlled(token) };
     }
 
     // Returns { ok, token? } or { error }.
@@ -83,14 +88,29 @@
     }
 
     on_leave(token) {
-      const i = this.seatIndex(token);
-      if (i < 0 || this.game) return;
-      this.seats.splice(i, 1);
-      if (!this.seat(this.hostToken) && this.seats[0]) this.hostToken = this.seats[0].token;
+      if (this.seatIndex(token) < 0 || this.game) return;
+      this.seats = this.seats.filter(s => s.token !== token && s.owner !== token);
+      const next = this.seats.find(s => !s.owner);
+      if (!this.seat(this.hostToken) && next) this.hostToken = next.token;
     }
 
-    on_pickRole(token, { role }) {
-      const seat = this.seat(token);
+    // Hotseat: add another player who plays on the requester's device.
+    on_addLocal(token, { name }) {
+      const owner = this.seat(token);
+      if (!owner || owner.owner) return { error: 'You are not in this room' };
+      if (this.game) return { error: 'Game already started' };
+      if (this.seats.length >= MAX_SEATS) return { error: 'Room is full (max 5 players)' };
+      this.seats.push({ token: newToken(), name: cleanName(name), role: null, connected: owner.connected, owner: token });
+    }
+
+    on_removeLocal(token, { seat }) {
+      const s = this.seats[seat];
+      if (this.game || !s || s.owner !== token) return { error: 'Cannot remove that player' };
+      this.seats.splice(seat, 1);
+    }
+
+    on_pickRole(token, { role, seat: idx }) {
+      const seat = idx == null ? this.seat(token) : this.controls(token, idx) && this.seats[idx];
       if (!seat || this.game) return { error: 'Cannot change role now' };
       if (role && !D.ROLES[role]) return { error: 'Unknown role' };
       if (role && this.seats.some(s => s !== seat && s.role === role)) return { error: 'Role already taken' };
@@ -131,11 +151,13 @@
       this.game = null;
     }
 
+    // action.as picks which controlled seat acts (hotseat); defaults to the requester's own seat.
     on_action(token, action) {
-      const i = this.seatIndex(token);
-      if (i < 0) return { error: 'You are not in this room' };
+      const { as, ...act } = action;
+      const i = as == null ? this.seatIndex(token) : Number(as);
+      if (!this.controls(token, i)) return { error: 'You are not in this room' };
       if (!this.game) return { error: 'No game in progress' };
-      this.game = Engine.apply(this.game, i, action);
+      this.game = Engine.apply(this.game, i, act);
     }
 
     on_chat(token, { text }) {

@@ -7,7 +7,9 @@ const gcolors = (g) => (g && g.colors) || COLORS;
 
 let net = null;
 const ui = {
-  room: null, game: null, you: -1, pawn: null, tab: 'log', chatSeen: 0, forecastFor: null,
+  // you: the seat this screen is acting as; self: this device's own seat; mine: every seat
+  // this device controls (self + hotseat players). autoFocus: last seat we switched to automatically.
+  room: null, game: null, you: -1, self: -1, mine: [], autoFocus: null, lobbySeat: null, pawn: null, tab: 'log', chatSeen: 0, forecastFor: null,
   logSeen: null, view: { x: 0, y: 0, w: MAP_W, h: MAP_H }, dragged: false,
 };
 const $ = (sel) => document.querySelector(sel);
@@ -124,11 +126,36 @@ const inviteLink = (code) => `${location.origin}${location.pathname}?room=${code
 function wire(n) {
   n.on('state', (data) => {
     const prevTurn = ui.game && ui.game.turnNo;
-    ui.room = data.room; ui.game = data.game; ui.you = data.you;
+    ui.room = data.room; ui.game = data.game; ui.self = data.you; ui.mine = data.mine || [data.you];
+    if (!ui.mine.includes(ui.you)) ui.you = ui.self;
     if (ui.game && ui.game.turnNo !== prevTurn) ui.pawn = null;
+    focusSeat();
     render();
   });
   n.on('status', () => { renderConn(); if (ui.room) render(); });
+}
+
+const isMine = (i) => ui.mine.includes(i);
+const hotseat = () => ui.mine.length > 1;
+
+// Hotseat: when one of this device's players has to act (their turn, a discard, Forecast),
+// switch the screen to them. Only switches when that need changes, so manual switching sticks.
+function focusSeat() {
+  const g = ui.game;
+  let want = null;
+  if (g && g.status === 'playing') {
+    if (g.interrupt && isMine(g.interrupt.player)) want = g.interrupt.player;
+    else if (g.overLimit.some(isMine)) want = g.overLimit.find(isMine);
+    else if (isMine(g.current)) want = g.current;
+  }
+  const key = want == null ? null : `${g.turnNo}:${want}`;
+  if (key !== ui.autoFocus && want != null && want !== ui.you) { ui.you = want; ui.pawn = null; }
+  ui.autoFocus = key;
+}
+function switchSeat(i) {
+  if (!isMine(i) || i === ui.you) return;
+  ui.you = i; ui.pawn = null;
+  render();
 }
 
 function connectingScreen(text) {
@@ -147,7 +174,7 @@ function leaveRoom() {
   if (net) net.close();
   net = null;
   setSession(null);
-  ui.room = ui.game = null; ui.you = -1; ui.logSeen = null; ui.prevCubes = null;
+  ui.room = ui.game = null; ui.you = ui.self = -1; ui.mine = []; ui.logSeen = null; ui.prevCubes = null;
   history.replaceState(null, '', location.pathname);
   homeScreen();
 }
@@ -165,7 +192,7 @@ function hostNewRoom(name) {
 
 function resumeHosting(sess, saved) {
   const room = new Room(sess.code, saved);
-  room.seats.forEach(seat => { seat.connected = seat.token === sess.token; });
+  room.seats.forEach(seat => { seat.connected = seat.token === sess.token || seat.owner === sess.token; });
   net = new HostNet(sess.code, room);
   net.myToken = sess.token;
   wire(net);
@@ -189,9 +216,9 @@ function joinRoom(code, joinData) {
   });
 }
 
-function send(action) {
+function send(action, as = ui.you) {
   if (!net) return;
-  net.emit('action', action, (res) => { if (res && res.error) toast(res.error); });
+  net.emit('action', { ...action, as }, (res) => { if (res && res.error) toast(res.error); });
 }
 function req(ev, data) {
   if (!net) return;
@@ -269,15 +296,36 @@ function renderConn() {
 
 function renderLobby() {
   const r = ui.room;
-  const isHost = r.host === ui.you;
+  const isHost = r.host === ui.self;
   const link = inviteLink(r.code);
-  const mySeat = r.seats[ui.you];
+  if (!isMine(ui.lobbySeat)) ui.lobbySeat = ui.self;
+  const pickFor = ui.lobbySeat;
+  const mySeat = r.seats[pickFor];
   const ownerOf = (role) => r.seats.findIndex(x => x.role === role);
 
   const seats = r.seats.map((seat, i) => h('div', { class: 'seat' },
     h('span', { class: 'dot' + (seat.connected ? ' on' : '') }),
-    h('span', { class: 'name' }, seat.name, i === ui.you ? h('span', { class: 'muted' }, ' (you)') : '', i === r.host ? h('span', { class: 'tag' }, 'host') : null),
-    h('span', { class: 'rolename' }, seat.role ? [h('span', { class: 'pawnchip', style: { background: ROLES[seat.role].color } }), ROLES[seat.role].name] : 'Random role')));
+    h('span', { class: 'name' }, seat.name, i === ui.self ? h('span', { class: 'muted' }, ' (you)') : '',
+      i === r.host ? h('span', { class: 'tag' }, 'host') : null,
+      seat.owner >= 0 ? h('span', { class: 'tag', title: `Plays on ${r.seats[seat.owner].name}'s device` }, `hotseat · ${r.seats[seat.owner].name}`) : null),
+    h('span', { class: 'rolename' }, seat.role ? [h('span', { class: 'pawnchip', style: { background: ROLES[seat.role].color } }), ROLES[seat.role].name] : 'Random role'),
+    seat.owner === ui.self ? h('button', { class: 'ghost small', title: 'Remove this player', onclick: () => req('removeLocal', { seat: i }) }, '✕') : null));
+  // The lobby re-renders on every room update, so keep the draft name (and focus) across renders.
+  const hadFocus = document.activeElement && document.activeElement.id === 'localName';
+  const localName = h('input', { id: 'localName', maxlength: 20, placeholder: 'Name', autocomplete: 'off', style: { flex: '1' },
+    value: ui.localDraft || '', oninput: (e) => { ui.localDraft = e.target.value; } });
+  const addLocal = () => {
+    const name = localName.value.trim();
+    if (!name) { toast('Enter a name for the extra player'); localName.focus(); return; }
+    ui.localDraft = '';
+    req('addLocal', { name });
+  };
+  localName.addEventListener('keydown', (e) => { if (e.key === 'Enter') addLocal(); });
+  const addLocalRow = r.seats.length < 5 ? h('div', null,
+    h('div', { class: 'row', style: { marginTop: '8px' } }, localName, h('button', { onclick: addLocal }, '+ Add player on this device')),
+    h('p', { class: 'fine' }, 'Hotseat: extra players share your screen. It switches to whoever has to act.')) : null;
+  const seatTabs = hotseat() ? h('div', { class: 'seat-tabs' }, h('span', { class: 'muted small' }, 'Choosing for:'),
+    ui.mine.map(i => h('button', { class: i === pickFor ? 'primary' : '', onclick: () => { ui.lobbySeat = i; renderLobby(); } }, r.seats[i].name))) : null;
 
   const cfg = r.config;
   const diffSel = h('select', { disabled: !isHost, onchange: (e) => req('config', { epidemics: Number(e.target.value) }) },
@@ -297,13 +345,13 @@ function renderLobby() {
     (chal.virulent || chal.mutation) ? h('p', { class: 'fine' }, 'Tip: the rulebook suggests 1 fewer epidemic than usual when adding a challenge.') : null);
 
   const roleCards = [
-    h('div', { class: 'role-card' + (!mySeat.role ? ' mine' : ''), style: { '--rc': '#6b7a8f' }, onclick: () => req('pickRole', { role: null }) },
+    h('div', { class: 'role-card' + (!mySeat.role ? ' mine' : ''), style: { '--rc': '#6b7a8f' }, onclick: () => req('pickRole', { role: null, seat: pickFor }) },
       h('div', { class: 'rn' }, '🎲 Random'), h('div', { class: 'rt' }, 'Get a random unused role when the game starts.')),
     ...Object.entries(ROLES).map(([key, ro]) => {
       const owner = ownerOf(key);
-      const mine = owner === ui.you, taken = owner >= 0 && !mine;
+      const mine = owner === pickFor, taken = owner >= 0 && !mine;
       return h('div', { class: 'role-card' + (mine ? ' mine' : '') + (taken ? ' taken' : ''), style: { '--rc': ro.color },
-        onclick: () => !taken && req('pickRole', { role: mine ? null : key }) },
+        onclick: () => !taken && req('pickRole', { role: mine ? null : key, seat: pickFor }) },
       owner >= 0 ? h('span', { class: 'who' }, r.seats[owner].name) : null,
       h('div', { class: 'rn' }, ro.name, ro.set === 'brink' ? h('span', { class: 'tag' }, 'Brink') : null),
       h('div', { class: 'rt' }, ro.text));
@@ -323,6 +371,7 @@ function renderLobby() {
           h('button', { onclick: () => { navigator.clipboard.writeText(link).then(() => toast('Invite link copied', 'info')); } }, 'Copy link')),
         h('h2', null, `Players (${r.seats.length}/5)`),
         seats,
+        addLocalRow,
         h('h2', { style: { marginTop: '18px' } }, 'Settings'),
         h('label', null, 'Difficulty', diffSel),
         h('label', null, 'Event cards', evSel),
@@ -338,8 +387,10 @@ function renderLobby() {
           } }, 'Leave')),
         isHost ? h('p', { class: 'fine' }, 'You are hosting: the game runs in this tab. Keep it open (refreshing is fine).') : null),
       h('div', { class: 'card' },
-        h('h2', null, 'Choose your role'),
+        h('h2', null, hotseat() ? `Choose a role for ${mySeat.name}` : 'Choose your role'),
+        seatTabs,
         h('div', { class: 'roles-grid' }, roleCards))));
+  if (hadFocus) localName.focus();
   renderConn();
 }
 
@@ -643,8 +694,8 @@ function scanLog(g) {
       alerts.push({ big: 'CURE FOUND', sub: `${m[1]} disease cured`, cls: 'good' });
     } else if ((m = e.msg.match(/The (\w+) disease has been ERADICATED/))) {
       alerts.push({ big: 'ERADICATED', sub: `${m[1]} is gone for good`, cls: 'good' });
-    } else if (/^--- /.test(e.msg) && e.msg.includes(g.players[ui.you].name + "'s turn")) {
-      alerts.push({ big: 'YOUR TURN', sub: '', cls: 'warn' });
+    } else if (/^--- /.test(e.msg) && (m = ui.mine.find(i => e.msg.includes(g.players[i].name + "'s turn"))) != null) {
+      alerts.push({ big: 'YOUR TURN', sub: hotseat() ? `${g.players[m].name} (${ROLES[g.players[m].role].name})` : '', cls: 'warn' });
     }
   });
   res.run = () => {
@@ -819,7 +870,7 @@ function renderTopbar(g) {
 }
 
 function showMenu() {
-  const isHost = ui.room.host === ui.you;
+  const isHost = ui.room.host === ui.self;
   const link = inviteLink(ui.room.code);
   const choices = [{ label: '🔗 Copy invite link', onClick: () => navigator.clipboard.writeText(link).then(() => toast('Invite link copied', 'info')) }];
   if (isHost) {
@@ -864,13 +915,15 @@ function renderPlayers(g) {
   box.innerHTML = '';
   g.players.forEach((p, i) => {
     const role = ROLES[p.role];
-    const mine = i === ui.you;
+    const mine = isMine(i);
     const seat = ui.room.seats[i];
     const over = g.overLimit.includes(i);
-    box.append(h('div', { class: 'player' + (i === g.current ? ' current' : ''), 'data-idx': i, style: { '--rc': role.color } },
+    const canSwitch = mine && i !== ui.you;
+    box.append(h('div', { class: 'player' + (i === g.current ? ' current' : '') + (canSwitch ? ' switchable' : '') + (hotseat() && i === ui.you ? ' viewing' : ''),
+      'data-idx': i, style: { '--rc': role.color }, title: canSwitch ? `Switch to ${p.name}` : null, onclick: canSwitch ? () => switchSeat(i) : null },
       h('div', { class: 'hdr' },
         h('span', { class: 'pawnchip', style: { background: role.color } }),
-        h('span', { class: 'nm' }, p.name, mine ? h('span', { class: 'muted' }, ' (you)') : ''),
+        h('span', { class: 'nm' }, p.name, mine ? h('span', { class: 'muted' }, hotseat() && i === ui.you ? ' (playing)' : ' (you)') : ''),
         i === g.current ? h('span', { class: 'turn-tag' }, 'TURN') : null,
         h('span', { class: 'dot' + (seat && seat.connected ? ' on' : ''), title: seat && seat.connected ? 'online' : 'offline' }),
         h('span', { class: 'loc' }, '📍 ', p.location)),
@@ -892,8 +945,12 @@ function renderHand(g) {
   const playing = g.status === 'playing';
   box.append(h('div', { class: 'label' },
     h('span', { class: 'rolebadge', style: { '--rc': ROLES[me.role].color }, ...roleTip(me.role) }, ROLES[me.role].name, ' ⓘ'),
-    h('b', null, 'Your hand'), `${me.hand.length}/${g.handLimits[ui.you]} cards`,
-    over ? h('span', { class: 'over' }, 'Discard!') : null));
+    h('b', null, hotseat() ? `${me.name}'s hand` : 'Your hand'), `${me.hand.length}/${g.handLimits[ui.you]} cards`,
+    over ? h('span', { class: 'over' }, 'Discard!') : null,
+    hotseat() ? h('span', { class: 'seat-tabs' }, ui.mine.map(i => h('button', {
+      class: i === ui.you ? 'primary' : '', title: `Play as ${g.players[i].name} (${ROLES[g.players[i].role].name})`,
+      style: { '--rc': ROLES[g.players[i].role].color }, onclick: () => switchSeat(i) },
+    h('span', { class: 'pawnchip', style: { background: ROLES[g.players[i].role].color } }), g.players[i].name))) : null));
   const sorted = me.hand.slice().sort((a, b) => {
     const ka = Engine.isEvent(a) ? 9 : COLORS.indexOf(CITIES[a].color), kb = Engine.isEvent(b) ? 9 : COLORS.indexOf(CITIES[b].color);
     return ka - kb || a.localeCompare(b);
@@ -934,15 +991,16 @@ function renderBanner(g) {
   const b = $('#banner');
   b.innerHTML = '';
   const msg = (kids, cls = '') => b.append(h('div', { class: 'msg ' + cls }, kids));
-  const backBtn = ui.room.host === ui.you ? h('button', { class: 'primary', onclick: () => req('backToLobby') }, 'Back to lobby') : null;
+  const backBtn = ui.room.host === ui.self ? h('button', { class: 'primary', onclick: () => req('backToLobby') }, 'Back to lobby') : null;
   if (net && net.status !== 'online') msg(['📡 ', net.statusText], 'warn');
   if (g.status === 'won') msg(['🎉 Victory! ', g.result, backBtn], 'good');
   if (g.status === 'lost') msg(['☠ Game over — ', g.result, backBtn], 'bad');
   if (g.status !== 'playing') return;
   if (g.interrupt) msg(`🔮 ${g.players[g.interrupt.player].name} is rearranging the infection deck (Forecast)…`, 'warn');
   g.overLimit.forEach(i => msg(i === ui.you
-    ? `✋ You're over your hand limit (${g.players[i].hand.length}/${g.handLimits[i]}). Click cards in your hand to discard (or play events).`
-    : `⏳ Waiting for ${g.players[i].name} to discard down to ${g.handLimits[i]} cards…`, 'warn'));
+    ? `✋ ${hotseat() ? g.players[i].name + ' is' : "You're"} over the hand limit (${g.players[i].hand.length}/${g.handLimits[i]}). Click cards in the hand to discard (or play events).`
+    : isMine(i) ? [`✋ ${g.players[i].name} must discard down to ${g.handLimits[i]} cards. `, h('button', { onclick: () => switchSeat(i) }, `Switch to ${g.players[i].name}`)]
+      : `⏳ Waiting for ${g.players[i].name} to discard down to ${g.handLimits[i]} cards…`, 'warn'));
   if (g.peek) msg(['🔧 Troubleshooter sees the next infections:', g.peek.map(c => chip(c))]);
   if (g.rvdColor && g.players.some(p => p.hand.includes('E:rapidVaccineDeployment') || p.stored === 'E:rapidVaccineDeployment')) {
     msg('💉 Rapid Vaccine Deployment can be played now (before the next action).', 'warn');
@@ -963,7 +1021,7 @@ function renderTurnRow(g) {
   const n = g.quietNight ? 0 : g.travelBan != null ? 1 : g.infectionRate;
   bar.append(
     h('span', { class: 'whose', ...roleTip(cur.role) }, h('span', { class: 'pawnchip', style: { background: ROLES[cur.role].color } }),
-      g.current === ui.you ? 'Your turn' : `${cur.name}'s turn`, h('span', { class: 'muted small' }, ` · ${ROLES[cur.role].name}`)),
+      g.current === ui.you && !hotseat() ? 'Your turn' : `${cur.name}'s turn`, h('span', { class: 'muted small' }, ` · ${ROLES[cur.role].name}`)),
     h('div', { class: 'stepper' },
       h('span', { class: 'step' + (ph === 'actions' ? ' on' : '') }, 'Actions',
         h('span', { class: 'pips' }, Array.from({ length: total }, (_, i) => h('i', { class: i < g.turn.actionsTaken ? 'used' : '' })))),
@@ -971,7 +1029,11 @@ function renderTurnRow(g) {
       h('span', { class: 'step' + (ph === 'draw' || ph === 'epidemic' ? ' on' : '') }, ph === 'epidemic' ? 'Epidemic!' : 'Draw 2'),
       h('span', { class: 'arrow' }, '▶'),
       h('span', { class: 'step' + (ph === 'infect' ? ' on' : '') }, `Infect ${n}`)));
-  if (g.status !== 'playing' || g.current !== ui.you) return;
+  if (g.status !== 'playing') return;
+  if (g.current !== ui.you) {
+    if (isMine(g.current)) bar.append(h('button', { class: 'primary', onclick: () => switchSeat(g.current) }, `Switch to ${cur.name}`));
+    return;
+  }
 
   const add = (...els) => bar.append(...els);
   const noActions = ph === 'actions' && g.turn.actionsLeft <= 0;
@@ -1142,7 +1204,8 @@ function playEventDialog(card, fromStored) {
 }
 
 function maybeOpenForecast(g) {
-  if (!g.interrupt || g.interrupt.type !== 'forecast' || g.interrupt.player !== ui.you) return;
+  if (!g.interrupt || g.interrupt.type !== 'forecast' || !isMine(g.interrupt.player)) return;
+  const by = g.interrupt.player;
   const id = (g.logCount || g.log.length) + ':' + g.interrupt.cards.join();
   if (ui.forecastFor === id) return;
   const order = g.interrupt.cards.slice();
@@ -1156,7 +1219,7 @@ function maybeOpenForecast(g) {
   };
   draw();
   openModal('🔮 Forecast — arrange the infection deck', h('div', null, h('p', { class: 'muted' }, 'The first card is drawn next.'), list),
-    [h('button', { class: 'primary', onclick: () => { closeModal(); send({ type: 'forecastOrder', order }); } }, 'Confirm order')]);
+    [h('button', { class: 'primary', onclick: () => { closeModal(); send({ type: 'forecastOrder', order }, by); } }, 'Confirm order')]);
   ui.forecastFor = id;
 }
 

@@ -291,6 +291,14 @@ a.link:hover { text-decoration: underline; }
 .pcard.pcard-new { animation: newcard 1.2s ease; }
 @keyframes newcard { 0% { transform: translateY(-10px) scale(1.08); box-shadow: 0 0 0 3px var(--gold), 0 10px 24px rgba(0,0,0,.5); } 100% { transform: none; } }
 .player.got-card { animation: gotcard .9s ease; }
+/* Hotseat */
+.seat button.small { padding: 2px 8px; font-size: 12px; }
+.seat-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 10px; }
+.seat-tabs button { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; font-size: 12px; }
+#myhand .label .seat-tabs { flex-direction: column; align-items: stretch; margin: 6px 0 0; gap: 4px; }
+.player.switchable { cursor: pointer; }
+.player.switchable:hover { border-color: var(--accent); }
+.player.viewing { outline: 2px solid var(--accent); outline-offset: -2px; }
 @keyframes gotcard { 30% { box-shadow: 0 0 0 2px var(--gold) inset, 0 0 22px rgba(240,185,62,.45); } }
 @media (prefers-reduced-motion: reduce) {
   #map .cube-new, #map .cube-gone, #map .ripple, #map .shock, #map .shieldfx, .pcard.pcard-new { animation: none; }
