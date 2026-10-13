@@ -35,7 +35,7 @@ To test multiplayer locally, add hotseat players in the lobby, or open two brows
 - **Events**: click a ★ card in your hand. Events can be played at any time, even on someone else's turn.
 - **Restart turn** undoes everything you did this turn (locked once Forecast reveals hidden cards). Your turn only moves on when you press **End turn**.
 - **End turn** draws your 2 player cards straight away. Then comes the epidemic pause for Resilient Population, if one was drawn, then **Infect**. Infect stays a separate click so anyone can play an event (e.g. One Quiet Night) first.
-- Infections play back one city at a time: a card per city appears bottom-left, and the city flashes with its new cubes.
+- Infections play back one city at a time: a card with a photo of the city appears bottom-left, and the city flashes with its new cubes.
 - Hover any role name (or the role badge by your hand) to see what it does.
 - If you go over the hand limit, click cards to discard them before play continues.
 
@@ -71,11 +71,13 @@ public/                 the whole site (served by GitHub Pages)
   net.js                PeerJS transport: HostNet (authoritative) / GuestNet
   app.js, style.css     UI (vanilla JS + SVG map, no build step)
   shared/worldmap.js    generated world-map background (do not edit)
+  shared/photos.js      city photo credits (images in img/cities/)
 server.js               local static dev server only
 tools/build-worldmap.js regenerates worldmap.js (Natural Earth coastlines bent to the board with a thin-plate spline)
 test/                   rules.js, room.js, sim.js
 ```
 
 Map data: Natural Earth (public domain) via world-atlas.
+City photos: Wikimedia Commons, freely licensed (CC0 / public domain / CC BY / CC BY-SA / Free Art License); per-photo credits are in the in-game Help and `public/shared/photos.js`.
 
 Fan-made for private play. Pandemic is © Z-Man Games; please don't host this publicly.

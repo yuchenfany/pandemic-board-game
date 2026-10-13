@@ -321,8 +321,19 @@ a.link:hover { text-decoration: underline; }
 
 /* Infection playback: one card per city, in draw order */
 #infectstrip { position: absolute; left: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 5px; z-index: 3; pointer-events: none; }
-#infectstrip .icard { display: flex; align-items: baseline; gap: 8px; padding: 6px 12px 6px 10px; border-radius: 8px; background: rgba(10,16,24,.92);
+#infectstrip { width: 250px; }
+#infectstrip .icard { padding: 6px 12px 6px 10px; border-radius: 8px; background: rgba(10,16,24,.92); overflow: hidden;
   border: 1px solid var(--line); border-left: 5px solid var(--c); box-shadow: 0 6px 18px rgba(0,0,0,.4); animation: icardIn .35s ease-out both; }
+#infectstrip .icard .txt { display: flex; align-items: baseline; gap: 8px; }
+/* Newest card: city photo on top. Older cards collapse to a single line. */
+#infectstrip .icard .ph { position: relative; margin: -6px -12px 6px -10px; height: 140px; background: #0b1622; }
+#infectstrip .icard .ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+#infectstrip .icard .ph small { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 6px 2px; font-size: 9px; color: rgba(255,255,255,.75);
+  background: linear-gradient(transparent, rgba(0,0,0,.7)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#infectstrip .icard:not(:last-child) .ph { display: none; }
+.ref .credits { font-size: 12px; columns: 2 260px; }
+.ref .credits div { break-inside: avoid; margin-bottom: 3px; }
+.ref .credits a { color: var(--accent); }
 #infectstrip .icard b { font-size: 15px; }
 #infectstrip .icard span { font-size: 12px; color: var(--muted); }
 #infectstrip .icard.ob { border-color: var(--danger); border-left-color: var(--c); }

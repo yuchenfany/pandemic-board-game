@@ -752,11 +752,15 @@ function scanLog(g) {
 // Gap between infection draws in the animation, so you can follow which city is hit.
 const INFECT_GAP = 950;
 let stripTimer;
+const PHOTOS = typeof CITY_PHOTOS === 'object' ? CITY_PHOTOS : {};
+// The newest card shows the city's photo; older ones shrink to one line (see style.css).
 function infectCard(city, color, note, cls = '') {
   const strip = $('#infectstrip');
+  const ph = PHOTOS[city];
   strip.append(h('div', { class: `icard ${cls}`, style: { '--c': COLOR_HEX[color] || '#6b7a8f' } },
-    h('b', null, city), h('span', null, note)));
-  while (strip.children.length > 9) strip.firstChild.remove();
+    ph ? h('div', { class: 'ph' }, h('img', { src: ph.src, alt: city }), h('small', null, `📷 ${ph.author} · ${ph.license}`)) : null,
+    h('div', { class: 'txt' }, h('b', null, city), h('span', null, note))));
+  while (strip.children.length > 6) strip.firstChild.remove();
   clearTimeout(stripTimer);
   stripTimer = setTimeout(() => { strip.innerHTML = ''; }, 3500);
 }
@@ -877,7 +881,16 @@ const chip = (card, opts = {}) => {
   return h('span', { class: `chip ${col}` + (opts.onclick ? ' clickable' : ''), style: { background: COLOR_HEX[col] }, onclick: opts.onclick }, card);
 };
 
+// Fetch the city photos in the background once a game is on screen, so infection cards show them instantly.
+let photosPreloaded = false;
+function preloadPhotos() {
+  if (photosPreloaded) return;
+  photosPreloaded = true;
+  setTimeout(() => Object.values(PHOTOS).forEach(p => { const img = new Image(); img.decoding = 'async'; img.src = p.src; }), 1500);
+}
+
 function renderGame() {
+  preloadPhotos();
   const g = ui.game;
   const effects = scanLog(g);
   renderTopbar(g);
@@ -970,7 +983,14 @@ function showHelp() {
       'When a city with purple cubes is infected it gets 1 purple and 1 of its own color. ',
       'Cure purple with 5 City cards of any color (at least 1 from a city with purple cubes). ',
       'Win by curing all 5 diseases, or the other 4 with no purple left on the board.'),
-    Object.values(PData.MUTATION_EVENTS).map(v => h('div', null, h('b', null, v.name), ' — ', v.text))),
+    Object.values(PData.MUTATION_EVENTS).map(v => h('div', null, h('b', null, v.name), ' — ', v.text)),
+    h('h4', null, 'Photo credits'),
+    h('div', { class: 'muted small' }, 'City photos are from Wikimedia Commons (the lead image of each city\'s Wikipedia article), resized. ',
+      'Free licences: CC0, public domain, CC BY, CC BY-SA or Free Art License.'),
+    h('div', { class: 'credits' }, Object.entries(PHOTOS).map(([city, p]) => h('div', null,
+      h('b', null, city), p.subject ? ` (${p.subject})` : '', ': ',
+      h('a', { href: p.source, target: '_blank', rel: 'noopener' }, 'photo'), ` by ${p.author}, `,
+      p.licenseUrl ? h('a', { href: p.licenseUrl, target: '_blank', rel: 'noopener' }, p.license) : p.license)))),
   [h('button', { onclick: closeModal }, 'Close')]);
 }
 
