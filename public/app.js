@@ -562,12 +562,12 @@ function showTip(city) {
   const here = g.players.filter(p => p.location === city).map(p => p.name);
   const tip = $('#tip');
   tip.innerHTML = '';
-  tip.append(
+  tip.append(...[
     h('b', null, city), ' ', h('span', { class: 'muted' }, `· ${c.color}`),
     h('div', null, cubes || h('span', { class: 'muted' }, 'No disease cubes')),
     g.stations.includes(city) ? h('div', null, '🏥 Research station') : null,
     here.length ? h('div', null, '👤 ', here.join(', ')) : null,
-    h('div', { class: 'muted small' }, 'Connects to: ', Engine.adj(g, city).join(', ')));
+    h('div', { class: 'muted small' }, 'Connects to: ', Engine.adj(g, city).join(', '))].filter(Boolean));
   const wrap = $('#mapwrap').getBoundingClientRect();
   const el = document.querySelector(`[data-city="${CSS.escape(city)}"] .dotc`).getBoundingClientRect();
   let x = el.right - wrap.left + 12, y = el.top - wrap.top - 6;
@@ -896,7 +896,8 @@ function renderTopbar(g) {
   const top = $('#topbar');
   top.innerHTML = '';
   const rates = Engine.RATES;
-  top.append(
+  // Native append() would print a null child as the text "null", so drop the absent stats first.
+  top.append(...[
     h('div', { class: 'brand' }, 'PANDEMIC', h('span', { class: 'tag' }, ui.room.code)),
     h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Outbreaks'),
       h('div', { class: 'track ob' }, Array.from({ length: 8 }, (_, i) => h('span', { class: (i < g.outbreaks ? 'on' : '') + (i === 7 ? ' last' : '') }, i === 7 ? '☠' : i + 1)))),
@@ -928,7 +929,7 @@ function renderTopbar(g) {
       h('button', { onclick: () => showPile('Infection discard pile', g.infectionDiscard) }, `Infected (${g.infectionDiscard.length})`),
       h('button', { onclick: showHelp }, 'Help'),
       h('button', { onclick: showMenu }, '⋯')),
-  );
+  ].filter(Boolean));
   renderConn();
 }
 
