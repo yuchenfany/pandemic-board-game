@@ -40,6 +40,11 @@ function randomEventParams(s, key) {
     case 'reexaminedResearch': return { player: pawn, card: pick(s.playerDiscard.filter(E.isCity)) };
     case 'remoteTreatment': return { removals: [pick(withCubes), pick(withCubes)] };
     case 'specialOrders': return { pawn };
+    case 'newRoute': {
+      const b = pick(CITY_NAMES.filter(c => c !== city && D.CITIES[c].color === D.CITIES[city].color && !E.adj(s, city).includes(c)));
+      return { a: city, b };
+    }
+    case 'borderClosure': return { a: city, b: pick(E.adj(s, city)) };
     default: return {};
   }
 }
@@ -104,6 +109,7 @@ function playOne(nPlayers, epidemics, challenges) {
     epidemics,
     eventCount: 13,
     challenges,
+    customEvents: Math.random() < 0.7,
   });
   checkInvariants(s);
   let steps = 0;

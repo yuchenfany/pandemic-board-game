@@ -34,7 +34,8 @@ To test multiplayer locally, add hotseat players in the lobby, or open two brows
 - **Other actions**: buttons at the bottom (build, treat, share, cure, role abilities, pass, end actions).
 - **Events**: click a ★ card in your hand. Events can be played at any time, even on someone else's turn.
 - **Restart turn** undoes everything you did this turn (locked once Forecast reveals hidden cards). Your turn only moves on when you press **End turn**.
-- After End turn: **Draw** → (epidemic pause for Resilient Population) → **Infect**. These stay separate clicks so anyone can play an event (e.g. One Quiet Night) in between.
+- **End turn** draws your 2 player cards straight away. Then comes the epidemic pause for Resilient Population, if one was drawn, then **Infect**. Infect stays a separate click so anyone can play an event (e.g. One Quiet Night) first.
+- Infections play back one city at a time: a card per city appears bottom-left, and the city flashes with its new cubes.
 - Hover any role name (or the role badge by your hand) to see what it does.
 - If you go over the hand limit, click cards to discard them before play continues.
 
@@ -46,6 +47,11 @@ To test multiplayer locally, add hotseat players in the lobby, or open two brows
 - **Challenges** (toggle in the lobby, can be combined):
   - **Virulent Strain**: the 8 Virulent Strain epidemic cards (Chronic Effect, Complex Molecular Structure, Government Interference, Rate Effect, Slippery Slope, Hidden Pocket, Unacceptable Loss, Uncounted Populations).
   - **Mutation**: a purple 5th disease (12 cubes), 2 Mutation infection cards and 3 Mutation event cards.
+- **Custom events** (lobby toggle, on by default, adds 2 cards to the deck):
+  - **New Route**: connect 2 cities of the same color. Pawns can Drive/Ferry along it, and outbreaks spread along it.
+  - **Border Closure**: remove 1 connection. No driving across it, and outbreaks stop there.
+  Both last for the rest of the game and show on the map (dashed gold = new route, red ✕ = closed).
+- **Random roles**: the host can exclude roles that Random may hand out. Players can still pick excluded roles themselves.
 - Up to 5 players, game log, team chat, reconnect.
 
 ## Known simplifications

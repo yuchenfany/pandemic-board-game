@@ -164,6 +164,9 @@
     reexaminedResearch: { name: 'Re-examined Research', set: 'brink', text: 'Select a player. That player may draw any 1 City card from the Player Discard Pile into their hand.' },
     remoteTreatment: { name: 'Remote Treatment', set: 'brink', text: 'Remove 2 disease cubes from the board.' },
     specialOrders: { name: 'Special Orders', set: 'brink', text: 'This turn, the current player may spend actions to move 1 other pawn as if it were their own.' },
+    // Custom (house) events: they change the map's connections for the rest of the game.
+    newRoute: { name: 'New Route', set: 'custom', text: 'Connect 2 cities of the same color that are not already connected. For the rest of the game, pawns can Drive/Ferry along it and outbreaks spread along it.' },
+    borderClosure: { name: 'Border Closure', set: 'custom', text: 'Remove 1 connection between 2 cities. For the rest of the game, pawns cannot Drive/Ferry along it and outbreaks do not spread along it.' },
   };
 
   // Virulent Strain challenge: epidemic cards whose extra effect hits only the Virulent Strain disease.

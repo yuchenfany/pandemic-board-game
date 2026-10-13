@@ -22,11 +22,13 @@
       this.code = code;
       this.seats = [];
       this.hostToken = null;
-      this.config = { epidemics: 5, eventsPerPlayer: 2, challenges: { virulent: false, mutation: false } };
+      this.config = { epidemics: 5, eventsPerPlayer: 2, challenges: { virulent: false, mutation: false }, excludedRoles: [], customEvents: true };
       this.game = null;
       this.chat = [];
       if (saved) Object.assign(this, saved, { code });
       this.config.challenges = this.config.challenges || { virulent: false, mutation: false };
+      this.config.excludedRoles = this.config.excludedRoles || [];
+      if (typeof this.config.customEvents !== 'boolean') this.config.customEvents = true;
     }
 
     toJSON() {
@@ -127,6 +129,8 @@
           if (typeof cfg.challenges[k] === 'boolean') this.config.challenges[k] = cfg.challenges[k];
         });
       }
+      if (typeof cfg.customEvents === 'boolean') this.config.customEvents = cfg.customEvents;
+      if (Array.isArray(cfg.excludedRoles)) this.config.excludedRoles = [...new Set(cfg.excludedRoles.filter(k => D.ROLES[k]))];
     }
 
     on_start(token) {
@@ -137,6 +141,8 @@
         epidemics: this.config.epidemics,
         eventCount: this.config.eventsPerPlayer * this.seats.length,
         challenges: this.config.challenges,
+        excludedRoles: this.config.excludedRoles,
+        customEvents: this.config.customEvents,
       });
     }
 

@@ -318,3 +318,32 @@ a.link:hover { text-decoration: underline; }
 .check.challenge { margin: 4px 0; }
 .check.challenge.off { color: var(--muted); }
 #logView .lc { font-weight: 600; }
+
+/* Infection playback: one card per city, in draw order */
+#infectstrip { position: absolute; left: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 5px; z-index: 3; pointer-events: none; }
+#infectstrip .icard { display: flex; align-items: baseline; gap: 8px; padding: 6px 12px 6px 10px; border-radius: 8px; background: rgba(10,16,24,.92);
+  border: 1px solid var(--line); border-left: 5px solid var(--c); box-shadow: 0 6px 18px rgba(0,0,0,.4); animation: icardIn .35s ease-out both; }
+#infectstrip .icard b { font-size: 15px; }
+#infectstrip .icard span { font-size: 12px; color: var(--muted); }
+#infectstrip .icard.ob { border-color: var(--danger); border-left-color: var(--c); }
+#infectstrip .icard.ob span { color: var(--danger); font-weight: 700; letter-spacing: 1px; }
+#infectstrip .icard.muted { opacity: .75; }
+@keyframes icardIn { from { transform: translateX(-24px); opacity: 0; } }
+#map .citylabel { font: 700 22px var(--display, sans-serif); text-anchor: middle; paint-order: stroke; stroke: rgba(0,0,0,.85); stroke-width: 4px;
+  animation: cityLabel 1.8s ease-out both; transform-box: fill-box; transform-origin: center; pointer-events: none; }
+@keyframes cityLabel { 0% { transform: translateY(8px) scale(.6); opacity: 0; } 15% { transform: none; opacity: 1; } 75% { opacity: 1; } 100% { transform: translateY(-14px); opacity: 0; } }
+#banner .msg.bad-soft { border-color: var(--danger); }
+#logView .tipped { cursor: help; text-decoration: underline dotted rgba(255,255,255,.35); }
+.tag.vs-effect { cursor: help; }
+/* Lobby: roles excluded from Random */
+details.exclude { margin: 4px 0 8px; }
+details.exclude summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.exclude-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 2px 10px; margin-top: 6px; }
+.exclude-grid label.check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.fine.over { color: var(--danger); }
+@media (prefers-reduced-motion: reduce) { #infectstrip .icard, #map .citylabel { animation: none; } }
+
+/* Connections changed by the custom events */
+#map .edge.cut { stroke: #ff6e64; stroke-opacity: .35; stroke-dasharray: 3 6; }
+#map .edge.added { stroke: var(--gold); stroke-width: 2.5; stroke-dasharray: 8 5; opacity: .9; }
+#map .cutmark { stroke: #ff6e64; stroke-width: 3; stroke-linecap: round; fill: none; pointer-events: none; }

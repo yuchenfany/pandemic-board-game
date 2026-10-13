@@ -66,6 +66,8 @@ document.addEventListener('mouseover', (e) => {
   hoverTip.style.top = `${y}px`;
 });
 const roleTip = (role) => ({ 'data-tip': ROLES[role].text, 'data-tip-title': ROLES[role].name });
+const vsTip = (key) => ({ 'data-tip': PData.VIRULENT[key].text,
+  'data-tip-title': `${PData.VIRULENT[key].name} · ${PData.VIRULENT[key].continuing ? 'continuing effect' : 'immediate effect'}` });
 
 const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
@@ -344,6 +346,18 @@ function renderLobby() {
       h('input', { type: 'checkbox', disabled: true }), 'Bio-Terrorist ', h('span', { class: 'tag' }, 'not available')),
     (chal.virulent || chal.mutation) ? h('p', { class: 'fine' }, 'Tip: the rulebook suggests 1 fewer epidemic than usual when adding a challenge.') : null);
 
+  const excluded = cfg.excludedRoles || [];
+  const randomCount = r.seats.filter(x => !x.role).length;
+  const randomPool = Object.keys(ROLES).filter(k => !excluded.includes(k) && ownerOf(k) < 0).length;
+  const exclusions = h('details', { class: 'exclude', open: excluded.length > 0 || null },
+    h('summary', null, excluded.length ? `Random can't give ${excluded.length} role${excluded.length > 1 ? 's' : ''}` : 'Random can give any role'),
+    h('div', { class: 'exclude-grid' }, Object.entries(ROLES).map(([key, ro]) => h('label', { class: 'check', ...roleTip(key) },
+      h('input', { type: 'checkbox', checked: excluded.includes(key), disabled: !isHost,
+        onchange: (e) => req('config', { excludedRoles: e.target.checked ? [...excluded, key] : excluded.filter(k => k !== key) }) }),
+      h('span', { class: 'pawnchip', style: { background: ro.color } }), ro.name))),
+    h('p', { class: 'fine' }, 'Ticked roles are never handed out at random. Players can still pick them.'),
+    randomCount > randomPool ? h('p', { class: 'fine over' }, `Not enough roles left for ${randomCount} Random player${randomCount > 1 ? 's' : ''}: untick some.`) : null);
+
   const roleCards = [
     h('div', { class: 'role-card' + (!mySeat.role ? ' mine' : ''), style: { '--rc': '#6b7a8f' }, onclick: () => req('pickRole', { role: null, seat: pickFor }) },
       h('div', { class: 'rn' }, '🎲 Random'), h('div', { class: 'rt' }, 'Get a random unused role when the game starts.')),
@@ -353,7 +367,8 @@ function renderLobby() {
       return h('div', { class: 'role-card' + (mine ? ' mine' : '') + (taken ? ' taken' : ''), style: { '--rc': ro.color },
         onclick: () => !taken && req('pickRole', { role: mine ? null : key, seat: pickFor }) },
       owner >= 0 ? h('span', { class: 'who' }, r.seats[owner].name) : null,
-      h('div', { class: 'rn' }, ro.name, ro.set === 'brink' ? h('span', { class: 'tag' }, 'Brink') : null),
+      h('div', { class: 'rn' }, ro.name, ro.set === 'brink' ? h('span', { class: 'tag' }, 'Brink') : null,
+        excluded.includes(key) ? h('span', { class: 'tag', title: 'Never handed out at random' }, 'not random') : null),
       h('div', { class: 'rt' }, ro.text));
     }),
   ];
@@ -376,6 +391,11 @@ function renderLobby() {
         h('label', null, 'Difficulty', diffSel),
         h('label', null, 'Event cards', evSel),
         h('label', null, 'Challenges'), challenges,
+        h('label', null, 'Random roles'), exclusions,
+        h('label', { class: 'check challenge', 'data-tip-title': 'Custom events',
+          'data-tip': Object.values(EVENTS).filter(e => e.set === 'custom').map(e => `${e.name}: ${e.text}`).join('  •  ') },
+        h('input', { type: 'checkbox', checked: cfg.customEvents !== false, disabled: !isHost, onchange: (e) => req('config', { customEvents: e.target.checked }) }),
+        'Custom events: New Route & Border Closure ', h('span', { class: 'tag' }, '+2 cards')),
         h('div', { class: 'row', style: { marginTop: '14px' } },
           isHost ? h('button', { class: 'primary big', style: { flex: '1' }, disabled: r.seats.length < 2, onclick: () => req('start') },
             r.seats.length < 2 ? 'Waiting for players…' : 'Start game') : h('span', { class: 'muted', style: { flex: '1' } }, 'Waiting for the host to start…'),
@@ -422,22 +442,12 @@ function buildMap() {
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   svg.append(...landLayers('m'));
   const edges = s('g');
-  const addEdge = (a, b, attrs) => {
-    const el = s('line', { class: 'edge', ...attrs });
+  EDGES.forEach(([a, b]) => edgeLines(a, b).forEach(attrs => {
+    const el = s('line', { class: 'edge', 'data-link': linkKey(a, b), ...attrs });
     edges.append(el);
     (edgeEls[a] = edgeEls[a] || []).push(el);
     (edgeEls[b] = edgeEls[b] || []).push(el);
-  };
-  EDGES.forEach(([a, b]) => {
-    const A = CITIES[a], B = CITIES[b];
-    if (Math.abs(A.x - B.x) > MAP_W / 2) {
-      const [w, e] = A.x < B.x ? [A, B] : [B, A];
-      addEdge(a, b, { x1: w.x, y1: w.y, x2: e.x - MAP_W, y2: e.y });
-      addEdge(a, b, { x1: e.x, y1: e.y, x2: w.x + MAP_W, y2: w.y });
-    } else {
-      addEdge(a, b, { x1: A.x, y1: A.y, x2: B.x, y2: B.y });
-    }
-  });
+  }));
   const cities = s('g');
   Object.entries(CITIES).forEach(([name, c]) => {
     const g = s('g', { class: 'city', 'data-city': name, transform: `translate(${c.x},${c.y})`,
@@ -449,10 +459,35 @@ function buildMap() {
     s('text', { y: 27 }, name));
     cities.append(g);
   });
-  svg.append(edges, s('g', { id: 'dyn', class: 'dyn' }), cities, s('g', { id: 'pawns' }), s('g', { id: 'fx', class: 'dyn' }));
+  svg.append(edges, s('g', { id: 'xedges' }), s('g', { id: 'dyn', class: 'dyn' }), cities, s('g', { id: 'pawns' }), s('g', { id: 'fx', class: 'dyn' }));
   setupPanZoom(svg);
   applyView();
   mapBuilt = true;
+}
+
+const linkKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+// Line segments for a connection; ones crossing the Pacific are drawn off both map edges.
+function edgeLines(a, b) {
+  const A = CITIES[a], B = CITIES[b];
+  if (Math.abs(A.x - B.x) <= MAP_W / 2) return [{ x1: A.x, y1: A.y, x2: B.x, y2: B.y }];
+  const [w, e] = A.x < B.x ? [A, B] : [B, A];
+  return [{ x1: w.x, y1: w.y, x2: e.x - MAP_W, y2: e.y }, { x1: e.x, y1: e.y, x2: w.x + MAP_W, y2: w.y }];
+}
+// New Route connections are drawn as dashed gold lines; closed borders are struck through in red.
+function renderLinks(g) {
+  const links = g.links || { added: [], cut: [] };
+  const cut = new Set(links.cut.map(([a, b]) => linkKey(a, b)));
+  document.querySelectorAll('#map .edge[data-link]').forEach(el => el.classList.toggle('cut', cut.has(el.dataset.link)));
+  const layer = $('#xedges');
+  layer.innerHTML = '';
+  links.added.forEach(([a, b]) => edgeLines(a, b).forEach(attrs =>
+    layer.append(s('line', { class: 'edge added', 'data-a': a, 'data-b': b, ...attrs }))));
+  links.cut.forEach(([a, b]) => {
+    const A = CITIES[a], B = CITIES[b];
+    if (Math.abs(A.x - B.x) > MAP_W / 2) return;
+    const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
+    layer.append(s('path', { class: 'cutmark', d: `M${mx - 7} ${my - 7} L${mx + 7} ${my + 7} M${mx + 7} ${my - 7} L${mx - 7} ${my + 7}` }));
+  });
 }
 
 function applyView() {
@@ -519,6 +554,7 @@ function setupPanZoom(svg) {
 
 function showTip(city) {
   (edgeEls[city] || []).forEach(e => e.classList.add('hot'));
+  document.querySelectorAll(`#xedges [data-a="${CSS.escape(city)}"], #xedges [data-b="${CSS.escape(city)}"]`).forEach(e => e.classList.add('hot'));
   const g = ui.game;
   if (!g) return;
   const c = CITIES[city];
@@ -531,7 +567,7 @@ function showTip(city) {
     h('div', null, cubes || h('span', { class: 'muted' }, 'No disease cubes')),
     g.stations.includes(city) ? h('div', null, '🏥 Research station') : null,
     here.length ? h('div', null, '👤 ', here.join(', ')) : null,
-    h('div', { class: 'muted small' }, 'Connects to: ', PData.ADJ[city].join(', ')));
+    h('div', { class: 'muted small' }, 'Connects to: ', Engine.adj(g, city).join(', ')));
   const wrap = $('#mapwrap').getBoundingClientRect();
   const el = document.querySelector(`[data-city="${CSS.escape(city)}"] .dotc`).getBoundingClientRect();
   let x = el.right - wrap.left + 12, y = el.top - wrap.top - 6;
@@ -548,6 +584,7 @@ function hideTip() {
 
 function renderMap(g, delays = {}) {
   if (!mapBuilt) buildMap();
+  renderLinks(g);
   const prev = ui.prevCubes;
   const reach = new Set();
   const myTurn = g.current === ui.you && g.turn.phase === 'actions' && g.status === 'playing';
@@ -676,20 +713,26 @@ function scanLog(g) {
       draws.push({ player: m[1], card: m[2] });
     } else if ((m = e.msg.match(/^OUTBREAK in (.+?) \((\w+)\)/))) {
       const [, city, color] = m;
-      const at = t + 150;
-      fx.push([at, () => outbreakFx(city, color)]);
-      PData.ADJ[city].forEach(nb => { if (delays[nb] == null) delays[nb] = at + 500; });
+      const at = t + 300;
+      fx.push([at, () => { outbreakFx(city, color); infectCard(city, color, 'OUTBREAK', 'ob'); }]);
+      Engine.adj(g, city).forEach(nb => { if (delays[nb] == null) delays[nb] = at + 700; });
       if (!alerts.some(a => a.big === 'OUTBREAK')) alerts.push({ big: 'OUTBREAK', sub: `${city} — outbreaks ${g.outbreaks}/8`, cls: '' });
-      t += 650;
-    } else if ((m = e.msg.match(/^Infect (.+?) \((\d) (\w+)\)/))) {
-      const [, city, n, color] = m;
-      t += 450;
+      t += INFECT_GAP + 300;
+    } else if ((m = e.msg.match(/^Infect (.+?) \((\d) (\w+)\)(?: — ([^.]+))?/))) {
+      const [, city, n, color, note] = m;
+      t += INFECT_GAP;
       if (delays[city] == null) delays[city] = t;
       const at = t;
-      fx.push([at, () => ripple(city, color, Number(n) >= 3)]);
+      fx.push([at, () => { ripple(city, color, Number(n) >= 3); cityLabel(city, `+${n}`, COLOR_HEX[color]); infectCard(city, color, `+${n} ${color}${note ? ' · ' + note : ''}`); }]);
+    } else if ((m = e.msg.match(/^(.+?) drawn — (\w+) is eradicated/))) {
+      const [, city, color] = m;
+      t += INFECT_GAP;
+      fx.push([t, () => infectCard(city, color, `${color} eradicated · no cubes`, 'muted')]);
     } else if ((m = e.msg.match(/^Infection in (.+?) was prevented/))) {
-      const city = m[1], at = t + 450;
-      fx.push([at, () => shield(city)]);
+      const city = m[1];
+      t += INFECT_GAP;
+      const at = t;
+      fx.push([at, () => { shield(city); cityLabel(city, 'blocked', '#8fd3ff'); infectCard(city, CITIES[city] && CITIES[city].color, 'prevented', 'muted'); }]);
     } else if ((m = e.msg.match(/discovered a cure for (\w+)/))) {
       alerts.push({ big: 'CURE FOUND', sub: `${m[1]} disease cured`, cls: 'good' });
     } else if ((m = e.msg.match(/The (\w+) disease has been ERADICATED/))) {
@@ -706,6 +749,22 @@ function scanLog(g) {
   return res;
 }
 
+// Gap between infection draws in the animation, so you can follow which city is hit.
+const INFECT_GAP = 950;
+let stripTimer;
+function infectCard(city, color, note, cls = '') {
+  const strip = $('#infectstrip');
+  strip.append(h('div', { class: `icard ${cls}`, style: { '--c': COLOR_HEX[color] || '#6b7a8f' } },
+    h('b', null, city), h('span', null, note)));
+  while (strip.children.length > 9) strip.firstChild.remove();
+  clearTimeout(stripTimer);
+  stripTimer = setTimeout(() => { strip.innerHTML = ''; }, 3500);
+}
+function cityLabel(city, text, color) {
+  const c = CITIES[city];
+  fxEl(s('text', { class: 'citylabel', x: c.x, y: c.y - 30, fill: color }, text), 1800);
+}
+
 function fxEl(el, ms) { $('#fx').append(el); setTimeout(() => el.remove(), ms); return el; }
 function ripple(city, color, big) {
   const c = CITIES[city];
@@ -717,7 +776,7 @@ function outbreakFx(city, color) {
   const c = CITIES[city];
   fxEl(s('circle', { class: 'shock', cx: c.x, cy: c.y, r: 14, stroke: COLOR_HEX[color] }), 1300);
   flashCity(city, 'flash');
-  PData.ADJ[city].forEach(nb => {
+  Engine.adj(ui.game, city).forEach(nb => {
     const n = CITIES[nb];
     let tx = n.x;
     if (Math.abs(tx - c.x) > MAP_W / 2) tx += tx < c.x ? MAP_W : -MAP_W; // fly across the Pacific edge
@@ -806,7 +865,10 @@ const chip = (card, opts = {}) => {
     const mtip = Engine.isMutationEvent(card) ? PData.MUTATION_EVENTS[card.slice(3)].text : 'Mutation: the bottom Infection card gets 1 purple cube.';
     return h('span', { class: 'chip purple', style: { background: COLOR_HEX.purple }, 'data-tip': mtip }, '🧬 ' + Engine.cardName(card));
   }
-  if (Engine.isEpidemic(card)) return h('span', { class: 'chip', style: { background: '#7a1d17' } }, '☣ ' + Engine.cardName(card));
+  if (Engine.isEpidemic(card)) {
+    const vs = Engine.vsKeyOf(card) && PData.VIRULENT[Engine.vsKeyOf(card)];
+    return h('span', { class: 'chip', style: { background: '#7a1d17' }, ...(vs ? vsTip(Engine.vsKeyOf(card)) : {}) }, '☣ ' + Engine.cardName(card));
+  }
   if (Engine.isEvent(card)) {
     const ev = EVENTS[Engine.eventKey(card)];
     return h('span', { class: 'chip event' + (opts.onclick ? ' clickable' : ''), 'data-tip': ev.text, 'data-tip-title': ev.name, onclick: opts.onclick }, '★ ' + ev.name);
@@ -845,7 +907,7 @@ function renderTopbar(g) {
         style: { '--vc': COLOR_HEX[c], borderColor: COLOR_HEX[c], background: g.cures[c] === 'none' ? 'transparent' : COLOR_HEX[c] } },
       g.cures[c] === 'cured' ? '✓' : g.cures[c] === 'eradicated' ? '★' : ''))),
     h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Cubes'),
-      h('div', { class: 'supply' }, gcolors(g).map(c => h('div', { class: 'bar' + (g.supply[c] <= 5 ? ' low' : '') },
+      h('div', { class: 'supply' }, gcolors(g).map(c => h('div', { class: 'bar' + (g.supply[c] <= 5 ? ' low' : ''), 'data-tip': `${g.supply[c]} ${c} cubes left${g.boxed && g.boxed[c] ? ` (${g.boxed[c]} removed from the game)` : ''}. You lose if a ${c} cube has to be placed and none are left.` },
         h('div', { class: 'bg' }, h('i', { style: { width: `${(g.supply[c] / (c === 'purple' ? 12 : 24)) * 100}%`, background: COLOR_HEX[c] } })), g.supply[c])))),
     h('div', { class: 'stat' }, h('span', { class: 'lbl' }, 'Deck'),
       h('span', { id: 'deckStat', 'data-tip': 'Cards left in the player deck. You lose if you must draw and cannot.' }, `🂠 ${g.playerDeckCount}`),
@@ -855,7 +917,8 @@ function renderTopbar(g) {
       'data-tip': g.virulent ? (g.vsEffects.length ? g.vsEffects.map(k => `${PData.VIRULENT[k].name}: ${PData.VIRULENT[k].text}`).join('  •  ') : 'No continuing effects yet.')
         : 'Revealed at the first epidemic: the disease with the most cubes on the board.' },
     h('span', { class: 'lbl' }, 'Virulent'),
-    g.virulent ? [h('span', { class: 'cube', style: { background: COLOR_HEX[g.virulent] } }), ` ${g.virulent}`, g.vsEffects.length ? h('span', { class: 'tag' }, `${g.vsEffects.length} effect${g.vsEffects.length > 1 ? 's' : ''}`) : null]
+    g.virulent ? [h('span', { class: 'cube', style: { background: COLOR_HEX[g.virulent] } }), ` ${g.virulent}`,
+      g.vsEffects.map(k => h('span', { class: 'tag vs-effect', ...vsTip(k) }, PData.VIRULENT[k].name, ' ⓘ'))]
       : h('span', { class: 'muted small' }, 'unknown')) : null,
     ...[g.quietNight ? h('span', { class: 'tag' }, '🌙 Quiet night') : null,
       g.travelBan != null ? h('span', { class: 'tag' }, '🚫 Travel ban') : null].filter(Boolean),
@@ -889,7 +952,7 @@ function showPile(title, cards) {
 
 function showHelp() {
   openModal('How to play', h('div', { class: 'ref' },
-    h('p', { class: 'muted' }, 'On your turn take your actions, draw 2 cards, then infect cities. ',
+    h('p', { class: 'muted' }, 'On your turn take your actions, then press End turn: you draw 2 cards straight away, and infect cities with the next click (so events like One Quiet Night can still be played in between). ',
       'Click a highlighted city to move there (hover a city for details; scroll or use +/− to zoom, drag to pan). ',
       'Click ★ event cards in your hand to play them — events work at any time, even on other players\' turns.'),
     h('h4', null, 'Win / lose'),
@@ -897,7 +960,7 @@ function showHelp() {
     h('h4', null, 'Roles'),
     Object.values(ROLES).map(r => h('div', null, h('b', { style: { color: r.color } }, r.name), ' — ', r.text)),
     h('h4', null, 'Events'),
-    Object.values(EVENTS).map(e => h('div', null, h('b', null, e.name), ' — ', e.text)),
+    Object.values(EVENTS).map(e => h('div', null, h('b', null, e.name), e.set === 'custom' ? ' (custom)' : '', ' — ', e.text)),
     h('h4', null, 'Challenge: Virulent Strain'),
     h('div', null, 'At the first epidemic, the disease with the most cubes becomes the Virulent Strain. Each epidemic card also has an effect on it:'),
     Object.values(PData.VIRULENT).map(v => h('div', null, h('b', null, v.name), v.continuing ? ' (continuing)' : ' (immediate)', ' — ', v.text)),
@@ -1001,6 +1064,8 @@ function renderBanner(g) {
     ? `✋ ${hotseat() ? g.players[i].name + ' is' : "You're"} over the hand limit (${g.players[i].hand.length}/${g.handLimits[i]}). Click cards in the hand to discard (or play events).`
     : isMine(i) ? [`✋ ${g.players[i].name} must discard down to ${g.handLimits[i]} cards. `, h('button', { onclick: () => switchSeat(i) }, `Switch to ${g.players[i].name}`)]
       : `⏳ Waiting for ${g.players[i].name} to discard down to ${g.handLimits[i]} cards…`, 'warn'));
+  gcolors(g).filter(c => g.supply[c] === 0 && g.cures[c] !== 'eradicated').forEach(c => msg([ICON[c],
+    ` No ${c} cubes left in the supply. The next ${c} cube that has to be placed loses the game.`], 'bad-soft'));
   if (g.peek) msg(['🔧 Troubleshooter sees the next infections:', g.peek.map(c => chip(c))]);
   if (g.rvdColor && g.players.some(p => p.hand.includes('E:rapidVaccineDeployment') || p.stored === 'E:rapidVaccineDeployment')) {
     msg('💉 Rapid Vaccine Deployment can be played now (before the next action).', 'warn');
@@ -1195,6 +1260,20 @@ function playEventDialog(card, fromStored) {
         { name: 'b', label: 'Second cube (may be the same city)', type: 'select', options: opts, value: '' }],
       (v) => play({ removals: [v.a, v.b].filter(Boolean).map(x => { const [city, color] = x.split('|'); return { city, color }; }) }));
     }
+    case 'newRoute':
+      return openForm(title, ev.text, [{ name: 'a', label: 'First city', type: 'select', options: cityOpts }], ({ a }) => {
+        const opts = CITY_NAMES.filter(c => c !== a && CITIES[c].color === CITIES[a].color && !Engine.adj(g, a).includes(c));
+        if (!opts.length) return toast(`${a} is already connected to every ${CITIES[a].color} city`);
+        openForm(title, `Connect ${a} to another ${CITIES[a].color} city.`,
+          [{ name: 'b', label: 'Second city', type: 'select', options: opts.map(c => [c, c]) }], ({ b }) => play({ a, b }));
+      });
+    case 'borderClosure':
+      return openForm(title, ev.text, [{ name: 'a', label: 'City', type: 'select', options: cityOpts }], ({ a }) => {
+        const opts = Engine.adj(g, a).slice().sort();
+        if (!opts.length) return toast(`${a} has no connections left`);
+        openForm(title, `Remove one of ${a}'s connections.`,
+          [{ name: 'b', label: 'Connection to', type: 'select', options: opts.map(c => [c, c]) }], ({ b }) => play({ a, b }));
+      });
     case 'specialOrders':
       return openForm(title, ev.text, [{ name: 'pawn', label: 'Pawn', type: 'select', options: players.filter(([i]) => i !== g.current) }],
         (v) => play({ pawn: Number(v.pawn) }));
@@ -1244,7 +1323,9 @@ function renderLog(g) {
   v.innerHTML = '';
   g.log.forEach(e => {
     const cls = /EPIDEMIC|ERADICATED|cure|VICTORY|GAME OVER/.test(e.msg) ? 'ep' : /OUTBREAK/.test(e.msg) ? 'ob' : /^---/.test(e.msg) ? 'turn' : '';
-    v.append(h('div', { class: cls }, colorize(e.msg)));
+    const vsm = e.msg.match(/^Virulent Strain effect — ([^:.]+)/);
+    const vsKey = vsm && Object.keys(PData.VIRULENT).find(k => PData.VIRULENT[k].name === vsm[1].trim());
+    v.append(h('div', { class: cls + (vsKey ? ' tipped' : ''), ...(vsKey ? vsTip(vsKey) : {}) }, colorize(e.msg)));
   });
   if (atBottom || !renderLog.done) v.scrollTop = v.scrollHeight;
   renderLog.done = true;

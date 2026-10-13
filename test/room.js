@@ -11,6 +11,9 @@ assert(r.handle(b.token, 'config', { epidemics: 6 }).error, 'only host configure
 assert(r.handle(a.token, 'config', { epidemics: 6 }).ok);
 assert(r.handle(a.token, 'config', { challenges: { mutation: true } }).ok);
 assert.deepStrictEqual(r.config.challenges, { virulent: false, mutation: true });
+assert(r.handle(a.token, 'config', { excludedRoles: ['generalist', 'bogus', 'generalist'] }).ok);
+assert.deepStrictEqual(r.config.excludedRoles, ['generalist'], 'excluded roles are validated and de-duplicated');
+assert(r.handle(b.token, 'config', { excludedRoles: [] }).error, 'only host excludes roles');
 assert(r.handle(a.token, 'pickRole', { role: 'medic' }).ok);
 assert(r.handle(b.token, 'pickRole', { role: 'medic' }).error, 'role taken');
 assert(r.handle(b.token, 'start').error, 'only host starts');

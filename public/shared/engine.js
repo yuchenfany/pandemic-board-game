@@ -62,7 +62,9 @@
 
   // ---------------------------------------------------------------- setup
 
-  function createGame({ players, epidemics = 5, eventCount, challenges = {} }) {
+  // excludedRoles: roles a "Random" player can't be given (players may still pick them).
+  // customEvents: also shuffle the custom events (New Route, Border Closure) into the deck.
+  function createGame({ players, epidemics = 5, eventCount, challenges = {}, excludedRoles = [], customEvents = false }) {
     const n = players.length;
     if (n < 2 || n > 5) fail('Pandemic needs 2 to 5 players');
     if (epidemics < 4 || epidemics > 7) fail('Epidemics must be 4-7');
@@ -72,7 +74,8 @@
     const chosen = players.map(p => p.role).filter(Boolean);
     if (new Set(chosen).size !== chosen.length) fail('Two players picked the same role');
     chosen.forEach(r => { if (!ROLES[r]) fail(`Unknown role ${r}`); });
-    const freeRoles = shuffle(roleKeys.filter(r => !chosen.includes(r)));
+    const freeRoles = shuffle(roleKeys.filter(r => !chosen.includes(r) && !excludedRoles.includes(r)));
+    if (players.filter(p => !p.role).length > freeRoles.length) fail('Not enough roles left for the Random players (too many excluded)');
 
     const colors = mutation ? [...COLORS, 'purple'] : COLORS.slice();
     const s = {
@@ -82,6 +85,7 @@
       cubes: Object.fromEntries(CITY_NAMES.map(c => [c, zeroCubes(colors)])),
       supply: Object.fromEntries(colors.map(c => [c, c === 'purple' ? PURPLE_CUBES : CUBES_PER_COLOR])),
       boxed: zeroCubes(colors), // cubes removed from the game (Unacceptable Loss)
+      links: { added: [], cut: [] }, // connections changed by New Route / Border Closure, as sorted [a, b] pairs
       stations: ['Austin'],
       cures: Object.fromEntries(colors.map(c => [c, 'none'])), // none | cured | eradicated
       rateIdx: 0,
@@ -126,9 +130,10 @@
       samples: zeroCubes(colors), // Field Operative
     }));
 
-    const allEvents = Object.keys(EVENTS);
+    const allEvents = Object.keys(EVENTS).filter(k => EVENTS[k].set !== 'custom');
     const numEvents = Math.max(0, Math.min(allEvents.length, eventCount == null ? 2 * n : eventCount));
-    const events = shuffle(allEvents).slice(0, numEvents).map(k => 'E:' + k);
+    const events = shuffle(allEvents).slice(0, numEvents)
+      .concat(customEvents ? Object.keys(EVENTS).filter(k => EVENTS[k].set === 'custom') : []).map(k => 'E:' + k);
     let deck = shuffle(CITY_NAMES.concat(events));
 
     const handSize = HAND_SIZE[n];
@@ -218,9 +223,19 @@
     });
   }
 
+  // Current connections of a city: the printed map plus New Route, minus Border Closure.
+  const linkKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const hasLink = (list, a, b) => (list || []).some(([x, y]) => linkKey(x, y) === linkKey(a, b));
+  function adj(s, city) {
+    const links = s.links || { added: [], cut: [] };
+    const out = ADJ[city].filter(nb => !hasLink(links.cut, city, nb));
+    links.added.forEach(([a, b]) => { if (a === city) out.push(b); else if (b === city) out.push(a); });
+    return out;
+  }
+
   function isProtected(s, city, color) {
     return s.players.some(p =>
-      (p.role === 'quarantineSpecialist' && (p.location === city || ADJ[p.location].includes(city))) ||
+      (p.role === 'quarantineSpecialist' && (p.location === city || adj(s, p.location).includes(city))) ||
       (p.role === 'medic' && p.location === city && s.cures[color] !== 'none'));
   }
 
@@ -248,7 +263,7 @@
     log(s, `OUTBREAK in ${city} (${color})! Outbreaks: ${Math.min(s.outbreaks, MAX_OUTBREAKS)}/${MAX_OUTBREAKS}.` +
       (step === 2 ? ' (Slippery Slope: +2)' : ''));
     if (s.outbreaks >= MAX_OUTBREAKS) { lose(s, `${MAX_OUTBREAKS} outbreaks occurred.`); return; }
-    for (const nb of ADJ[city]) {
+    for (const nb of adj(s, city)) {
       placeCubes(s, nb, color, 1, chain);
       if (s.status !== 'playing') return;
     }
@@ -338,7 +353,7 @@
     const has = (c) => actor.hand.includes(c);
 
     // A neighbouring city is always reached by Drive/Ferry: it's free, so flights there would only waste a card.
-    if (ADJ[from].includes(to)) return [{ method: 'drive', label: 'Drive / Ferry' }];
+    if (adj(s, from).includes(to)) return [{ method: 'drive', label: 'Drive / Ferry' }];
     if (has(to)) res.push({ method: 'direct', card: to, label: `Direct Flight (discard ${to})` });
     if (has(from)) res.push({ method: 'charter', card: from, label: `Charter Flight (discard ${from})` });
     if (s.stations.includes(from) && s.stations.includes(to)) res.push({ method: 'shuttle', label: 'Shuttle Flight' });
@@ -430,7 +445,8 @@
       const k = Math.min(4, s.supply[v]);
       s.supply[v] -= k;
       s.boxed[v] += k;
-      log(s, `Unacceptable Loss: ${k} ${v} cube(s) removed from the game.`);
+      log(s, `Unacceptable Loss: ${k} ${v} cube(s) removed from the game.` +
+        (s.supply[v] === 0 ? ` No ${v} cubes are left: the next ${v} cube placed loses the game.` : ''));
     } else if (key === 'uncountedPopulations') {
       const cities = CITY_NAMES.filter(c => s.cubes[c][v] === 1);
       cities.forEach(c => { if (s.status === 'playing') infectCity(s, c, 1, v, ' — Uncounted Populations'); });
@@ -494,6 +510,15 @@
       log(s, `${p.name} drew ${cardName(card)}.`);
     }
     s.turn.phase = 'infect';
+  }
+
+  function drawPlayerCards(s) {
+    if (s.playerDeck.length < 2) { lose(s, 'Not enough player cards left to draw.'); return; }
+    const drawn = [s.playerDeck.pop(), s.playerDeck.pop()];
+    // A Mutation Event is resolved before an Epidemic drawn at the same time.
+    if (isEpidemic(drawn[0]) && isMutationEvent(drawn[1])) drawn.reverse();
+    s.turn.pending = drawn;
+    continueDrawing(s);
   }
 
   function infectPhase(s) {
@@ -592,6 +617,27 @@
       case 'oneQuietNight':
         s.quietNight = true;
         break;
+      case 'newRoute': {
+        const a = validCity(prm.a), b = validCity(prm.b);
+        if (a === b) fail('Pick 2 different cities');
+        if (CITIES[a].color !== CITIES[b].color) fail('Both cities must be the same color');
+        if (adj(s, a).includes(b)) fail(`${a} and ${b} are already connected`);
+        s.links = s.links || { added: [], cut: [] };
+        // Re-opening a closed printed connection restores it; otherwise it's a brand-new route.
+        if (ADJ[a].includes(b)) s.links.cut = s.links.cut.filter(([x, y]) => linkKey(x, y) !== linkKey(a, b));
+        else s.links.added.push([a, b].sort());
+        log(s, `New Route: ${a} and ${b} are now connected.`);
+        break;
+      }
+      case 'borderClosure': {
+        const a = validCity(prm.a), b = validCity(prm.b);
+        if (!adj(s, a).includes(b)) fail(`${a} and ${b} are not connected`);
+        s.links = s.links || { added: [], cut: [] };
+        if (hasLink(s.links.added, a, b)) s.links.added = s.links.added.filter(([x, y]) => linkKey(x, y) !== linkKey(a, b));
+        else s.links.cut.push([a, b].sort());
+        log(s, `Border Closure: ${a} and ${b} are no longer connected.`);
+        break;
+      }
       case 'resilientPopulation': {
         if (!isCity(prm.card)) fail('Pick a City card (Mutation cards cannot be removed)');
         if (!removeOne(s.infectionDiscard, prm.card)) fail('Pick a card from the Infection Discard pile');
@@ -638,7 +684,7 @@
         const seen = new Set([cities[0]]), stack = [cities[0]];
         while (stack.length) {
           const c = stack.pop();
-          ADJ[c].forEach(nb => { if (cities.includes(nb) && !seen.has(nb)) { seen.add(nb); stack.push(nb); } });
+          adj(s, c).forEach(nb => { if (cities.includes(nb) && !seen.has(nb)) { seen.add(nb); stack.push(nb); } });
         }
         if (seen.size !== cities.length) fail('The cities must form a connected group');
         list.forEach(r => removeCubes(s, r.city, color, r.n));
@@ -857,17 +903,12 @@
         log(s, s.turn.actionsLeft > 0 ? `${p.name} ended their turn early.` : `${p.name} ended their actions.`);
         s.turn.actionsLeft = 0;
         s.turn.phase = 'draw';
+        drawPlayerCards(s); // drawn straight away; events can still be played before Infect
         break;
-      case 'draw': {
+      case 'draw':
         if (pid !== s.current || s.turn.phase !== 'draw') fail('Not time to draw');
-        if (s.playerDeck.length < 2) { lose(s, 'Not enough player cards left to draw.'); break; }
-        const drawn = [s.playerDeck.pop(), s.playerDeck.pop()];
-        // A Mutation Event is resolved before an Epidemic drawn at the same time.
-        if (isEpidemic(drawn[0]) && isMutationEvent(drawn[1])) drawn.reverse();
-        s.turn.pending = drawn;
-        continueDrawing(s);
+        drawPlayerCards(s);
         break;
-      }
       case 'continue':
         if (pid !== s.current || s.turn.phase !== 'epidemic') fail('Nothing to continue');
         s.infectionDeck.push(...shuffle(s.infectionDiscard));
@@ -924,7 +965,7 @@
   }
 
   return {
-    GameError, createGame, apply, view, getMoveOptions, getShareOptions, cardsNeededForCure, cureCards, leaveBlocked,
+    GameError, createGame, apply, view, adj, getMoveOptions, getShareOptions, cardsNeededForCure, cureCards, leaveBlocked,
     isCity, isEvent, isEpidemic, isMutationEvent, isMutationCard, vsKeyOf, eventKey, cardName, handLimit,
     RATES, MAX_STATIONS, MAX_OUTBREAKS,
   };
