@@ -34,6 +34,7 @@ test('drive, direct and charter flights', () => {
   s = E.apply(s, 0, { type: 'pass' });
   assert.strictEqual(s.turn.phase, 'actions', 'waits for End turn');
   expectFail(() => E.apply(s, 0, { type: 'pass' }), /No actions left/);
+  s.playerDeck.push('Paris', 'Cairo'); // known cards, so no epidemic is drawn
   s = E.apply(s, 0, { type: 'endActions' });
   assert.strictEqual(s.turn.phase, 'infect', 'End turn draws the 2 player cards straight away');
   assert.strictEqual(s.players[0].hand.length, 3, 'Austin + 2 drawn');
@@ -421,8 +422,7 @@ test('custom events: New Route and Border Closure change drives and outbreaks', 
   assert(!E.adj(s, 'Panama City').includes('Lima'));
   s.players[0].location = 'Austin'; s.players[1].location = 'Austin';
   put(s, 'Lima', 'yellow', 3);
-  s = E.apply(s, 0, { type: 'endActions' });
-  s.infectionDeck = s.infectionDeck.filter(c => c !== 'Lima'); s.infectionDeck.push('Lima');
+  s.infectionDeck = s.infectionDeck.filter(c => c !== 'Lima' && c !== 'Paris'); s.infectionDeck.push('Paris', 'Lima'); // top: Lima, then Paris
   s.turn.phase = 'infect';
   s = E.apply(s, 0, { type: 'infect' });
   assert.strictEqual(s.cubes['Lagos'].yellow >= 1, true, 'outbreak spreads along New Route');
