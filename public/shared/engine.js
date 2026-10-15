@@ -226,9 +226,14 @@
   // Current connections of a city: the printed map plus New Route, minus Border Closure.
   const linkKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
   const hasLink = (list, a, b) => (list || []).some(([x, y]) => linkKey(x, y) === linkKey(a, b));
+  // Outbreaks spread along printed connections only (minus Border Closure): New Route is for pawns, not infections.
+  function infectAdj(s, city) {
+    const links = s.links || { added: [], cut: [] };
+    return ADJ[city].filter(nb => !hasLink(links.cut, city, nb));
+  }
   function adj(s, city) {
     const links = s.links || { added: [], cut: [] };
-    const out = ADJ[city].filter(nb => !hasLink(links.cut, city, nb));
+    const out = infectAdj(s, city);
     links.added.forEach(([a, b]) => { if (a === city) out.push(b); else if (b === city) out.push(a); });
     return out;
   }
@@ -263,7 +268,7 @@
     log(s, `OUTBREAK in ${city} (${color})! Outbreaks: ${Math.min(s.outbreaks, MAX_OUTBREAKS)}/${MAX_OUTBREAKS}.` +
       (step === 2 ? ' (Slippery Slope: +2)' : ''));
     if (s.outbreaks >= MAX_OUTBREAKS) { lose(s, `${MAX_OUTBREAKS} outbreaks occurred.`); return; }
-    for (const nb of adj(s, city)) {
+    for (const nb of infectAdj(s, city)) {
       placeCubes(s, nb, color, 1, chain);
       if (s.status !== 'playing') return;
     }
@@ -630,12 +635,20 @@
         break;
       }
       case 'borderClosure': {
-        const a = validCity(prm.a), b = validCity(prm.b);
-        if (!adj(s, a).includes(b)) fail(`${a} and ${b} are not connected`);
+        // Up to 2 connections, each as { a, b }: [{ a, b }] or [{ a, b }, { a, b }].
+        const picks = Array.isArray(prm.closures) ? prm.closures : [];
+        if (!picks.length || picks.length > 2) fail('Pick 1 or 2 connections to remove');
         s.links = s.links || { added: [], cut: [] };
-        if (hasLink(s.links.added, a, b)) s.links.added = s.links.added.filter(([x, y]) => linkKey(x, y) !== linkKey(a, b));
-        else s.links.cut.push([a, b].sort());
-        log(s, `Border Closure: ${a} and ${b} are no longer connected.`);
+        const done = [];
+        for (const p of picks) {
+          const a = validCity(p && p.a), b = validCity(p && p.b);
+          if (done.some(([x, y]) => linkKey(x, y) === linkKey(a, b))) fail('Pick 2 different connections');
+          if (!adj(s, a).includes(b)) fail(`${a} and ${b} are not connected`);
+          if (hasLink(s.links.added, a, b)) s.links.added = s.links.added.filter(([x, y]) => linkKey(x, y) !== linkKey(a, b));
+          else s.links.cut.push([a, b].sort());
+          done.push([a, b]);
+          log(s, `Border Closure: ${a} and ${b} are no longer connected.`);
+        }
         break;
       }
       case 'resilientPopulation': {
@@ -967,6 +980,6 @@
   return {
     GameError, createGame, apply, view, adj, getMoveOptions, getShareOptions, cardsNeededForCure, cureCards, leaveBlocked,
     isCity, isEvent, isEpidemic, isMutationEvent, isMutationCard, vsKeyOf, eventKey, cardName, handLimit,
-    RATES, MAX_STATIONS, MAX_OUTBREAKS,
+    RATES, MAX_STATIONS, MAX_OUTBREAKS, infectAdj,
   };
 }));

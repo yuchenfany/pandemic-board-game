@@ -48,8 +48,8 @@ To test multiplayer locally, add hotseat players in the lobby, or open two brows
   - **Virulent Strain**: the 8 Virulent Strain epidemic cards (Chronic Effect, Complex Molecular Structure, Government Interference, Rate Effect, Slippery Slope, Hidden Pocket, Unacceptable Loss, Uncounted Populations).
   - **Mutation**: a purple 5th disease (12 cubes), 2 Mutation infection cards and 3 Mutation event cards.
 - **Custom events** (lobby toggle, on by default, adds 2 cards to the deck):
-  - **New Route**: connect 2 cities of the same color. Pawns can Drive/Ferry along it, and outbreaks spread along it.
-  - **Border Closure**: remove 1 connection. No driving across it, and outbreaks stop there.
+  - **New Route**: connect 2 cities of the same color. Pawns can Drive/Ferry along it, but outbreaks do not spread along it.
+  - **Border Closure**: remove up to 2 connections. No driving across them, and outbreaks stop there.
   Both last for the rest of the game and show on the map (dashed gold = new route, red ✕ = closed).
 - **Random roles**: the host can exclude roles that Random may hand out. Players can still pick excluded roles themselves.
 - Up to 5 players, game log, team chat, reconnect.

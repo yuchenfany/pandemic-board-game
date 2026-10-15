@@ -418,15 +418,25 @@ test('custom events: New Route and Border Closure change drives and outbreaks', 
   s = E.apply(s, 0, { type: 'move', to: 'Lagos', method: 'drive' });
   assert.strictEqual(s.players[0].location, 'Lagos', 'drive along the new route');
   // Outbreak in Lima spreads along the new route, but not across a closed border.
-  s = E.apply(s, 0, { type: 'playEvent', card: 'E:borderClosure', params: { a: 'Lima', b: 'Panama City' } });
+  s = E.apply(s, 0, { type: 'playEvent', card: 'E:borderClosure', params: { closures: [{ a: 'Lima', b: 'Panama City' }] } });
   assert(!E.adj(s, 'Panama City').includes('Lima'));
   s.players[0].location = 'Austin'; s.players[1].location = 'Austin';
   put(s, 'Lima', 'yellow', 3);
   s.infectionDeck = s.infectionDeck.filter(c => c !== 'Lima' && c !== 'Paris'); s.infectionDeck.push('Paris', 'Lima'); // top: Lima, then Paris
   s.turn.phase = 'infect';
   s = E.apply(s, 0, { type: 'infect' });
-  assert.strictEqual(s.cubes['Lagos'].yellow >= 1, true, 'outbreak spreads along New Route');
+  assert.strictEqual(s.cubes['Lagos'].yellow, 0, 'outbreak does not spread along New Route');
   assert.strictEqual(s.cubes['Panama City'].yellow, 0, 'outbreak blocked by Border Closure');
+});
+
+test('custom events: Border Closure removes up to 2 connections', () => {
+  const s = fresh(['scientist', 'medic'], [['E:borderClosure']]);
+  expectFail(() => E.apply(s, 0, { type: 'playEvent', card: 'E:borderClosure', params: { closures: [] } }), /1 or 2/);
+  expectFail(() => E.apply(s, 0, { type: 'playEvent', card: 'E:borderClosure', params: { closures: [{ a: 'Lima', b: 'Panama City' }, { a: 'Panama City', b: 'Lima' }] } }), /different/);
+  expectFail(() => E.apply(s, 0, { type: 'playEvent', card: 'E:borderClosure', params: { closures: [{ a: 'Lima', b: 'Paris' }] } }), /not connected/);
+  const s2 = E.apply(s, 0, { type: 'playEvent', card: 'E:borderClosure', params: { closures: [{ a: 'Lima', b: 'Panama City' }, { a: 'Paris', b: 'London' }] } });
+  assert(!E.adj(s2, 'Lima').includes('Panama City'));
+  assert(!E.adj(s2, 'Paris').includes('London'));
 });
 
 test('custom events are only in the deck when enabled', () => {

@@ -44,7 +44,7 @@ function randomEventParams(s, key) {
       const b = pick(CITY_NAMES.filter(c => c !== city && D.CITIES[c].color === D.CITIES[city].color && !E.adj(s, city).includes(c)));
       return { a: city, b };
     }
-    case 'borderClosure': return { a: city, b: pick(E.adj(s, city)) };
+    case 'borderClosure': return { closures: [{ a: city, b: pick(E.adj(s, city)) }] };
     default: return {};
   }
 }

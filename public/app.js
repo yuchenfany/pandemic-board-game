@@ -473,7 +473,7 @@ function edgeLines(a, b) {
   const [w, e] = A.x < B.x ? [A, B] : [B, A];
   return [{ x1: w.x, y1: w.y, x2: e.x - MAP_W, y2: e.y }, { x1: e.x, y1: e.y, x2: w.x + MAP_W, y2: w.y }];
 }
-// New Route connections are drawn as dashed gold lines; closed borders are struck through in red.
+// New Route connections are drawn as dashed gold lines (pawns only); closed borders are struck through in red.
 function renderLinks(g) {
   const links = g.links || { added: [], cut: [] };
   const cut = new Set(links.cut.map(([a, b]) => linkKey(a, b)));
@@ -715,7 +715,7 @@ function scanLog(g) {
       const [, city, color] = m;
       const at = t + 300;
       fx.push([at, () => { outbreakFx(city, color); infectCard(city, color, 'OUTBREAK', 'ob'); }]);
-      Engine.adj(g, city).forEach(nb => { if (delays[nb] == null) delays[nb] = at + 700; });
+      Engine.infectAdj(g, city).forEach(nb => { if (delays[nb] == null) delays[nb] = at + 700; });
       if (!alerts.some(a => a.big === 'OUTBREAK')) alerts.push({ big: 'OUTBREAK', sub: `${city} — outbreaks ${g.outbreaks}/8`, cls: '' });
       t += INFECT_GAP + 300;
     } else if ((m = e.msg.match(/^Infect (.+?) \((\d) (\w+)\)(?: — ([^.]+))?/))) {
@@ -780,7 +780,7 @@ function outbreakFx(city, color) {
   const c = CITIES[city];
   fxEl(s('circle', { class: 'shock', cx: c.x, cy: c.y, r: 14, stroke: COLOR_HEX[color] }), 1300);
   flashCity(city, 'flash');
-  Engine.adj(ui.game, city).forEach(nb => {
+  Engine.infectAdj(ui.game, city).forEach(nb => {
     const n = CITIES[nb];
     let tx = n.x;
     if (Math.abs(tx - c.x) > MAP_W / 2) tx += tx < c.x ? MAP_W : -MAP_W; // fly across the Pacific edge
@@ -1288,13 +1288,25 @@ function playEventDialog(card, fromStored) {
         openForm(title, `Connect ${a} to another ${CITIES[a].color} city.`,
           [{ name: 'b', label: 'Second city', type: 'select', options: opts.map(c => [c, c]) }], ({ b }) => play({ a, b }));
       });
-    case 'borderClosure':
-      return openForm(title, ev.text, [{ name: 'a', label: 'City', type: 'select', options: cityOpts }], ({ a }) => {
-        const opts = Engine.adj(g, a).slice().sort();
+    case 'borderClosure': {
+      // Remove 1 or 2 connections. Each pick is a city plus one of its connections.
+      const closures = [];
+      const same = (p, a, b) => (p.a === a && p.b === b) || (p.a === b && p.b === a);
+      const pickOne = () => openForm(title, ev.text, [{ name: 'a', label: 'City', type: 'select', options: cityOpts }], ({ a }) => {
+        const opts = Engine.adj(g, a).filter(c => !closures.some(p => same(p, a, c))).sort();
         if (!opts.length) return toast(`${a} has no connections left`);
         openForm(title, `Remove one of ${a}'s connections.`,
-          [{ name: 'b', label: 'Connection to', type: 'select', options: opts.map(c => [c, c]) }], ({ b }) => play({ a, b }));
+          [{ name: 'b', label: 'Connection to', type: 'select', options: opts.map(c => [c, c]) }], ({ b }) => {
+            closures.push({ a, b });
+            if (closures.length === 2) return play({ closures });
+            openChoice(title, [
+              { label: 'Remove a 2nd connection', onClick: pickOne },
+              { label: 'Just this one', onClick: () => play({ closures }) }],
+            `Removed the connection ${a} – ${b}.`);
+          });
       });
+      return pickOne();
+    }
     case 'specialOrders':
       return openForm(title, ev.text, [{ name: 'pawn', label: 'Pawn', type: 'select', options: players.filter(([i]) => i !== g.current) }],
         (v) => play({ pawn: Number(v.pawn) }));
