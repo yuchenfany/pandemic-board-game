@@ -10,6 +10,26 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <button id="bedtimeButton" title="Change quiet hours during daytime">Bedtime settings</button>
+  <div id="bedtimeWarning" class="hidden" role="status" aria-live="polite"></div>
+  <dialog id="bedtimeLock" aria-labelledby="bedtimeMessage">
+    <h2 id="bedtimeMessage">Time for bed</h2>
+    <p>Your game stays saved in the host’s browser. Play unlocks automatically in the morning.</p>
+    <p>If you’re hosting, keep this tab open so your friends stay connected. Play may wait when it’s your turn.</p>
+    <p class="muted">Quiet hours follow this device’s local time. Settings unlock in the morning.</p>
+  </dialog>
+  <dialog id="bedtimeSettings" aria-labelledby="bedtimeSettingsTitle">
+    <form id="bedtimeForm">
+      <h2 id="bedtimeSettingsTitle">Bedtime settings</h2>
+      <p>Quiet hours apply to this browser using your device’s local time. You’ll get a warning 15 minutes before play locks.</p>
+      <label>Bedtime <input id="bedtimeStart" type="time" required></label>
+      <label>Morning unlock <input id="bedtimeEnd" type="time" required></label>
+      <p>Settings cannot be changed during quiet hours. A schedule that includes the current time locks play immediately.</p>
+      <p id="bedtimeError" role="alert"></p>
+      <button type="button" id="bedtimeCancel">Cancel</button>
+      <button type="submit" class="primary">Save schedule</button>
+    </form>
+  </dialog>
   <!-- Home -->
   <section id="home" class="screen hidden">
     <svg id="homeMap" aria-hidden="true"></svg>
@@ -92,6 +112,8 @@
   <script src="shared/photos.js"></script>
   <script src="shared/engine.js"></script>
   <script src="shared/room.js"></script>
+  <script src="shared/bedtime.js"></script>
+  <script src="bedtime.js"></script>
   <script src="net.js"></script>
   <script src="app.js"></script>
 </body>

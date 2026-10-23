@@ -29,6 +29,19 @@ npm test             # rule scenarios + room tests + 300 random simulated games
 ```
 To test multiplayer locally, add hotseat players in the lobby, or open two browser windows (one normal, one incognito).
 
+## Bedtime lock
+
+Play locks automatically from **11 p.m. to 7 a.m.** using your device’s local time.
+Use **Bedtime settings** to change the schedule outside quiet hours. The schedule is saved
+in this browser, and a warning appears 15 minutes before bedtime. Settings cannot be
+changed during quiet hours; there is no snooze or override button.
+
+At bedtime, new rooms, new joins, and local game actions are blocked, including in tabs
+that were already open. The screen unlocks automatically in the morning. Existing connections
+and host saves continue, including after a refresh: keep the host tab open for other players.
+The game may wait for the locked player’s turn or a required discard/event response.
+This is a browser-local habit aid; clearing site storage or changing the device clock can bypass it.
+
 ## How to play
 - **Move**: click a highlighted city on the map. If there's more than one way to get there, you'll be asked which. Hover a city for details; scroll or use +/− to zoom, and drag to pan.
 - **Other actions**: buttons at the bottom (build, treat, share, cure, role abilities, pass, end actions).

@@ -358,3 +358,13 @@ details.exclude summary { cursor: pointer; color: var(--muted); font-size: 13px;
 #map .edge.cut { stroke: #ff6e64; stroke-opacity: .35; stroke-dasharray: 3 6; }
 #map .edge.added { stroke: var(--gold); stroke-width: 2.5; stroke-dasharray: 8 5; opacity: .9; }
 #map .cutmark { stroke: #ff6e64; stroke-width: 3; stroke-linecap: round; fill: none; pointer-events: none; }
+
+/* Bedtime dialogs use the top layer, above game dialogs and animations. */
+#bedtimeLock, #bedtimeSettings { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: 16px; padding: 28px; width: min(480px, calc(100vw - 32px)); max-height: 90vh; overflow: auto; }
+#bedtimeLock::backdrop { background: var(--bg); }
+#bedtimeSettings::backdrop { background: rgba(0,0,0,.75); }
+#bedtimeButton { position: fixed; right: 12px; bottom: 8px; z-index: 9; font-size: 11px; padding: 3px 8px; }
+#bedtimeWarning { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 40;
+  width: max-content; max-width: 92vw; padding: 10px 16px; border-radius: 8px; background: var(--gold); color: #171200; pointer-events: none; }
+#bedtimeError { color: var(--danger); }

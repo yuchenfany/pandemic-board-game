@@ -1,4 +1,4 @@
-/* global PData, Engine, Room, HostNet, GuestNet */
+/* global PData, Engine, Room, HostNet, GuestNet, Bedtime */
 'use strict';
 const { CITIES, COLORS, COLOR_HEX, ROLES, EVENTS, DIFFICULTIES, EDGES, MAP_W, MAP_H } = PData;
 const CITY_NAMES = Object.keys(CITIES).sort();
@@ -182,6 +182,7 @@ function leaveRoom() {
 }
 
 function hostNewRoom(name) {
+  if (!Bedtime.canPlay()) return;
   const code = Room.newCode();
   net = new HostNet(code, new Room(code));
   wire(net);
@@ -203,6 +204,7 @@ function resumeHosting(sess, saved) {
 }
 
 function joinRoom(code, joinData) {
+  if (!joinData.token && !Bedtime.canPlay()) return;
   net = new GuestNet(code);
   wire(net);
   connectingScreen(`Connecting to room ${code}…`);
