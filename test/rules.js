@@ -473,7 +473,9 @@ test('a universities game starts at its own start and switches the active board'
   assert.deepStrictEqual(g.stations, ['Texas A&M']);
   assert(g.players.every(p => p.location === 'Texas A&M'));
   assert(D.CITIES['MIT'] && !D.CITIES['Paris'] && D.CITY_NAMES.length === 48);
-  assert.deepStrictEqual(E.adj(g, 'Texas A&M').sort(), ['Georgia Tech', 'UTSW', 'WashU']);
+  const slot = D.BOARDS.universities.slots, W = D.BOARDS.cities;
+  const expected = W.edges.filter(e => e.includes(W.start)).map(e => e.find(c => c !== W.start));
+  assert.deepStrictEqual(E.adj(g, 'Texas A&M').map(u => slot[u]).sort(), expected.sort(), 'start keeps the start city\'s connections');
   // Applying an action to a cities game switches back.
   const c = E.createGame({ players: [{ name: 'A' }, { name: 'B' }], epidemics: 4 });
   D.useBoard('universities');

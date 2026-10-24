@@ -23,8 +23,8 @@ SCHOOLS = {  # name: (lat, lon)
     'UC Berkeley': (37.872, -122.259), 'Stanford': (37.428, -122.170), 'UCSF': (37.763, -122.458),
     'UCD': (38.539, -121.750), 'UCSB': (34.414, -119.849), 'UCLA': (34.069, -118.445),
     'USC': (34.022, -118.285), 'Caltech': (34.138, -118.125), 'UCI': (33.640, -117.844),
-    'UCSD': (32.880, -117.234), 'Scripps': (32.896, -117.243), 'UWashington': (47.655, -122.308),
-    'UBC': (49.261, -123.246), 'Utah': (40.765, -111.842), 'UColorado': (40.007, -105.266),
+    'UCSD': (32.880, -117.234), 'Scripps': (32.896, -117.243), 'UW': (47.655, -122.308),
+    'UBC': (49.261, -123.246), 'Utah': (40.765, -111.842), 'CU Boulder': (40.007, -105.266),
     'UT Austin': (30.285, -97.734), 'Texas A&M': (30.619, -96.339), 'Rice': (29.717, -95.402),
     'UTSW': (32.812, -96.839), 'UMinnesota': (44.974, -93.228), 'UWisconsin': (43.076, -89.412),
     'WashU': (38.649, -90.311), 'UIUC': (40.102, -88.227), 'UChicago': (41.789, -87.600),
@@ -38,16 +38,18 @@ SCHOOLS = {  # name: (lat, lon)
     'Yale': (41.316, -72.922), 'Harvard': (42.377, -71.117), 'MIT': (42.360, -71.094),
 }
 REGIONS = {
-    'west': ['UWashington', 'UC Berkeley', 'Stanford', 'UCSF', 'UCD', 'UCSB', 'UCLA', 'USC', 'Caltech', 'UCI', 'UCSD', 'Scripps'],
-    'north/midwest': ['UBC', 'Utah', 'UColorado', 'UMinnesota', 'UWisconsin', 'WashU', 'UIUC', 'UChicago', 'Northwestern', 'Purdue', 'Indiana', 'UMich'],
+    'west': ['UW', 'UC Berkeley', 'Stanford', 'UCSF', 'UCD', 'UCSB', 'UCLA', 'USC', 'Caltech', 'UCI', 'UCSD', 'Scripps'],
+    'north/midwest': ['UBC', 'Utah', 'CU Boulder', 'UMinnesota', 'UWisconsin', 'WashU', 'UIUC', 'UChicago', 'Northwestern', 'Purdue', 'Indiana', 'UMich'],
     'south': ['UT Austin', 'Texas A&M', 'Rice', 'UTSW', 'Vanderbilt', 'Emory', 'Georgia Tech', 'Duke', 'UNC', 'Virginia Tech', 'UMaryland', 'JHU'],
     'northeast': ['CMU', 'UToronto', 'McGill', 'UPenn', 'Princeton', 'Columbia', 'NYU', 'Cornell Tech', 'Cornell', 'Yale', 'Harvard', 'MIT'],
 }
 W, H = 1240, 660
+GRAZE = 24  # px: a link closer than this to another school's center looks like it passes through it
 NUDGE = {'Utah': (0, 55)}  # extra offsets to the target positions, in px
-FIX = {'Virginia Tech': (878, 404), 'UMaryland': (1006, 392)}  # final positions forced after layout (label clean-up)
+FIX = {'Virginia Tech': (878, 404), 'UMaryland': (1006, 392), 'USC': (300, 500), 'Stanford': (168, 288),
+       'UCI': (400, 425), 'UCSD': (445, 485), 'Cornell': (998, 185), 'Emory': (872, 536)}  # final positions forced after layout (labels, links passing over schools)
 COLOR_OF = {'west': 'blue', 'south': 'red', 'north/midwest': 'black', 'northeast': 'yellow'}  # display colors
-WRAP_COST, CROSS_COST, NEAR_COST = 250, 120, 150  # per wrap-around link / crossing pair / link grazing a school
+WRAP_COST, CROSS_COST, NEAR_COST = 250, 120, 400  # per wrap-around link / crossing pair / link passing over a school
 
 # ---- cities board graph (from data.js)
 src = "const D=require('./public/shared/data');console.log(JSON.stringify({C:D.BOARDS.cities.cities,E:D.BOARDS.cities.edges}))"
@@ -97,7 +99,7 @@ for a, (i, j) in enumerate(pairs):
         if k in (i, j): continue
         for A, B in G[a]:
             t = np.clip(np.dot(P[k] - A, B - A) / np.dot(B - A, B - A), 0, 1)
-            NEAR[a] += np.linalg.norm(A + t * (B - A) - P[k]) < 18
+            NEAR[a] += np.linalg.norm(A + t * (B - A) - P[k]) < GRAZE
 
 Ea = np.array([e[0] for e in E]); Eb = np.array([e[1] for e in E])
 def cost(f):
