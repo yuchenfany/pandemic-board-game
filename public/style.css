@@ -372,3 +372,7 @@ details.exclude summary { cursor: pointer; color: var(--muted); font-size: 13px;
 #bedtimeWarning { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 40;
   width: max-content; max-width: 92vw; padding: 10px 16px; border-radius: 8px; background: var(--gold); color: #171200; pointer-events: none; }
 #bedtimeError { color: var(--danger); }
+
+/* local-names mode: toggle on the map and native names on hand cards */
+#zoom button.on { background: #2d6cdf; color: #fff; }
+.pcard .cl { font-size: 12px; margin-top: 2px; color: #3a4452; font-family: 'Noto Sans CJK SC','PingFang SC','Hiragino Sans','Yu Gothic','Malgun Gothic','Microsoft YaHei',sans-serif; }

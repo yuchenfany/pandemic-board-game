@@ -16,11 +16,12 @@ const ICON = { blue: '🔵', yellow: '🟡', black: '⚫', red: '🔴', purple: 
 const gcolors = (g) => (g && g.colors) || COLORS;
 
 let net = null;
+const store0 = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
 const ui = {
   // you: the seat this screen is acting as; self: this device's own seat; mine: every seat
   // this device controls (self + hotseat players). autoFocus: last seat we switched to automatically.
   room: null, game: null, you: -1, self: -1, mine: [], autoFocus: null, lobbySeat: null, pawn: null, tab: 'log', chatSeen: 0, forecastFor: null,
-  logSeen: null, view: { x: 0, y: 0, w: MAP_W, h: MAP_H }, dragged: false,
+  logSeen: null, localNames: !!store0('pandemic:localnames'), view: { x: 0, y: 0, w: MAP_W, h: MAP_H }, dragged: false,
 };
 const $ = (sel) => document.querySelector(sel);
 
@@ -571,12 +572,29 @@ function setupPanZoom(svg) {
   };
   svg.addEventListener('pointerup', end);
   svg.addEventListener('pointercancel', end);
-  document.querySelectorAll('#zoom button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#zoom button[data-zoom]').forEach(b => b.addEventListener('click', () => {
     const v = ui.view;
     if (b.dataset.zoom === 'reset') { Object.assign(v, { x: 0, y: 0, w: MAP_W, h: MAP_H }); applyView(); return; }
     zoomAt(b.dataset.zoom === 'in' ? 1 / 1.3 : 1.3, v.x + v.w / 2, v.y + v.h / 2);
   }));
 }
+
+// Local-names mode (China/Japan/Korea board): map labels show each city in its own script.
+function applyLocalNames() {
+  const has = !!(CITIES[CITY_NAMES[0]] && CITIES[CITY_NAMES[0]].local);
+  const btn = $('#namesBtn');
+  btn.classList.toggle('hidden', !has);
+  btn.classList.toggle('on', has && ui.localNames);
+  document.querySelectorAll('#map .city').forEach((g) => {
+    const name = g.dataset.city, c = CITIES[name];
+    g.querySelector('text').textContent = has && ui.localNames && c.local ? c.local : name;
+  });
+}
+$('#namesBtn').addEventListener('click', () => {
+  ui.localNames = !ui.localNames;
+  try { localStorage.setItem('pandemic:localnames', JSON.stringify(ui.localNames)); } catch { /* blocked */ }
+  applyLocalNames();
+});
 
 function showTip(city) {
   (edgeEls[city] || []).forEach(e => e.classList.add('hot'));
@@ -611,6 +629,7 @@ function hideTip() {
 
 function renderMap(g, delays = {}) {
   if (!mapBuilt || mapBoard !== PData.board) buildMap();
+  applyLocalNames();
   renderLinks(g);
   const prev = ui.prevCubes;
   const reach = new Set();
@@ -1079,6 +1098,7 @@ function renderHand(g) {
     return h('div', { class: 'pcard' + (isEv ? ' event' : '') + (onclick ? ' clickable' : '') + (over && !stored ? ' discard' : '') + (card === me.location ? ' here' : ''),
       style: { '--c': isEv ? '#9c6a00' : COLOR_HEX[CITIES[card].color] }, 'data-card': isEv ? EVENTS[Engine.eventKey(card)].name : card, ...tip, onclick },
     h('div', { class: 'cn' }, isEv ? '★ ' + EVENTS[Engine.eventKey(card)].name : card),
+    !isEv && CITIES[card].local ? h('div', { class: 'cl' }, CITIES[card].local) : null,
     h('div', { class: 'cc' }, isEv ? (stored ? 'stored event' : 'event · play anytime') : CITIES[card].color));
   };
   sorted.forEach(c => box.append(cardEl(c, false)));

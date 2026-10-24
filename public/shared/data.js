@@ -284,6 +284,12 @@
   // Which city's slot each place takes (checked by test/rules.js; not used by the game).
   const EAST_ASIA_SLOTS = {"Xi'an": "Fremont", "Taiyuan": "Chicago", "Beijing": "Toronto", "Jinan": "Boston", "Zhengzhou": "Austin", "Shijiazhuang": "Washington", "Tianjin": "London", "Qingdao": "Madrid", "Dalian": "Paris", "Shenyang": "Marburg", "Changchun": "Athens", "Harbin": "St. Petersburg", "Changsha": "Irvine", "Wuhan": "Mexico City", "Hefei": "Miami", "Nanjing": "Panama City", "Nanchang": "Lima", "Xiamen": "Punta Arenas", "Fuzhou": "Falkland Island", "Yangzhou": "Rio", "Shanghai": "Lagos", "Hangzhou": "Kinshasa", "Ningbo": "Khartoum", "Wenzhou": "Johannesburg", "Busan": "Algiers", "Fukuoka": "Cairo", "Incheon": "Istanbul", "Seoul": "Moscow", "Kobe": "Baghdad", "Osaka": "Riyadh", "Daegu": "Tehran", "Kyoto": "Karachi", "Tokyo": "Delhi", "Sapporo": "Mumbai", "Yokohama": "Chennai", "Nagoya": "Kolkata", "Hong Kong": "Beijing", "Guangzhou": "Seoul", "Shenzhen": "Tokyo", "Nanning": "Nanjing", "Zhangjiajie": "Osaka", "Guiyang": "Taipei", "Kunming": "Wuhan", "Lhasa": "Bangkok", "Chengdu": "Ho Chi Minh City", "Chongqing": "Manila", "Ürümqi": "Kuala Lumpur", "Lanzhou": "Auckland"};
 
+  // Native-script names for the East Asia board: Chinese cities use their `zh` name; Japanese and Korean
+  // cities get their own (kanji / hangul) so the board can show each city in its local language.
+  const EAST_ASIA_LOCAL = { Kobe: '神戸', Osaka: '大阪', Kyoto: '京都', Nagoya: '名古屋', Tokyo: '東京', Sapporo: '札幌', Yokohama: '横浜', Fukuoka: '福岡',
+    Incheon: '인천', Seoul: '서울', Busan: '부산', Daegu: '대구' };
+  Object.entries(EAST_ASIA).forEach(([n, c]) => { c.local = EAST_ASIA_LOCAL[n] || c.zh; });
+
   // Boards share the rules engine; `start` is where pawns and the first research station begin,
   // `land` names the global (from worldmap.js / usmap.js) holding the background coastline path.
   const BOARDS = {
