@@ -160,6 +160,8 @@ for _ in range(5000):
     P += (np.clip(76 - r, 0, None)[:, :, None] * d / r[:, :, None]).sum(1) * 0.25 + (T - P) * 0.015
     P[:, 0] = np.clip(P[:, 0], 40, W - 40); P[:, 1] = np.clip(P[:, 1], 38, H - 30)
 for name, xy in cfg['fix'].items(): P[S.index(name)] = xy
+if os.environ.get('FIXFILE'):  # extra forced positions, {name: [x, y]}: e.g. from a nudge search
+    for name, xy in json.load(open(os.environ['FIXFILE'])).items(): P[S.index(name)] = xy
 P = P.round()
 
 # ---- geometry of every possible link (recomputed whenever positions change)
@@ -263,7 +265,8 @@ def untangle(P, f, P0, rounds=20000, seed=0):
     return P
 
 # ---- alternate: assign (anneal) -> nudge positions (untangle) -> re-assign on the new positions
-if cfg['slots']: perm = tuple(cfg['slots'])
+SLOTS = os.environ['SLOTS'].split(',') if os.environ.get('SLOTS') else cfg['slots']  # SLOTS=a,b,c,d overrides the region order
+if SLOTS: perm = tuple(SLOTS)
 else:  # the start's region must take the start city's color
     geometry(P)
     startRegion = next((r for r, m in REGIONS.items() if start in m), None)
