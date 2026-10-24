@@ -580,6 +580,8 @@ function setupPanZoom(svg) {
 }
 
 // Local-names mode (China/Japan/Korea board): map labels show each city in its own script.
+const nm = (city) => (ui.localNames && CITIES[city] && CITIES[city].local) || city;
+const bothNames = (city) => CITIES[city] && CITIES[city].local ? `${city} · ${CITIES[city].local}` : city;
 function applyLocalNames() {
   const has = !!(CITIES[CITY_NAMES[0]] && CITIES[CITY_NAMES[0]].local);
   const btn = $('#namesBtn');
@@ -587,13 +589,14 @@ function applyLocalNames() {
   btn.classList.toggle('on', has && ui.localNames);
   document.querySelectorAll('#map .city').forEach((g) => {
     const name = g.dataset.city, c = CITIES[name];
-    g.querySelector('text').textContent = has && ui.localNames && c.local ? c.local : name;
+    g.querySelector('text').textContent = has ? nm(name) : name;
   });
 }
 $('#namesBtn').addEventListener('click', () => {
   ui.localNames = !ui.localNames;
   try { localStorage.setItem('pandemic:localnames', JSON.stringify(ui.localNames)); } catch { /* blocked */ }
   applyLocalNames();
+  if (ui.game) render();
 });
 
 function showTip(city) {
@@ -607,7 +610,7 @@ function showTip(city) {
   const tip = $('#tip');
   tip.innerHTML = '';
   tip.append(...[
-    h('b', null, city), ' ', c.zh ? h('span', { class: 'zh' }, c.zh) : null, ' ', h('span', { class: 'muted' }, `· ${c.color}`),
+    h('b', null, city), ' ', (c.local || c.zh) ? h('span', { class: 'zh' }, c.local || c.zh) : null, ' ', h('span', { class: 'muted' }, `· ${c.color}`),
     c.region ? h('div', { class: 'muted small' }, c.region) : null,
     h('div', null, cubes || h('span', { class: 'muted' }, 'No disease cubes')),
     g.stations.includes(city) ? h('div', null, '🏥 Research station') : null,
@@ -805,7 +808,7 @@ function infectCard(city, color, note, cls = '') {
   const ph = PHOTOS[city];
   strip.append(h('div', { class: `icard ${cls}`, style: { '--c': COLOR_HEX[color] || '#6b7a8f' } },
     ph ? h('div', { class: 'ph' }, h('img', { src: ph.src, alt: city }), h('small', null, `📷 ${ph.author} · ${ph.license}`)) : null,
-    h('div', { class: 'txt' }, h('b', null, city), CITIES[city] && CITIES[city].zh ? h('em', { class: 'zh' }, CITIES[city].zh) : null, h('span', null, note)),
+    h('div', { class: 'txt' }, h('b', { title: bothNames(city) }, nm(city)), h('span', null, note)),
     CITIES[city] && CITIES[city].region ? h('div', { class: 'loc' }, CITIES[city].region) : null));
   while (strip.children.length > 6) strip.firstChild.remove();
   clearTimeout(stripTimer);
@@ -925,7 +928,7 @@ const chip = (card, opts = {}) => {
     return h('span', { class: 'chip event' + (opts.onclick ? ' clickable' : ''), 'data-tip': ev.text, 'data-tip-title': ev.name, onclick: opts.onclick }, '★ ' + ev.name);
   }
   const col = CITIES[card] ? CITIES[card].color : 'black';
-  return h('span', { class: `chip ${col}` + (opts.onclick ? ' clickable' : ''), style: { background: COLOR_HEX[col] }, onclick: opts.onclick }, card);
+  return h('span', { class: `chip ${col}` + (opts.onclick ? ' clickable' : ''), style: { background: COLOR_HEX[col] }, title: bothNames(card), onclick: opts.onclick }, nm(card));
 };
 
 // Fetch the city photos in the background once a game is on screen, so infection cards show them instantly.
@@ -1094,11 +1097,10 @@ function renderHand(g) {
       else if (over) onclick = () => send({ type: 'discard', card });
     }
     const tip = isEv ? { 'data-tip': EVENTS[Engine.eventKey(card)].text + ' Click to play.', 'data-tip-title': EVENTS[Engine.eventKey(card)].name }
-      : { title: over ? 'Click to discard' : `${CITIES[card].color} city card` };
+      : { title: (over ? 'Click to discard · ' : '') + `${bothNames(card)} · ${CITIES[card].color} city card` };
     return h('div', { class: 'pcard' + (isEv ? ' event' : '') + (onclick ? ' clickable' : '') + (over && !stored ? ' discard' : '') + (card === me.location ? ' here' : ''),
       style: { '--c': isEv ? '#9c6a00' : COLOR_HEX[CITIES[card].color] }, 'data-card': isEv ? EVENTS[Engine.eventKey(card)].name : card, ...tip, onclick },
-    h('div', { class: 'cn' }, isEv ? '★ ' + EVENTS[Engine.eventKey(card)].name : card),
-    !isEv && CITIES[card].local ? h('div', { class: 'cl' }, CITIES[card].local) : null,
+    h('div', { class: 'cn' }, isEv ? '★ ' + EVENTS[Engine.eventKey(card)].name : nm(card)),
     h('div', { class: 'cc' }, isEv ? (stored ? 'stored event' : 'event · play anytime') : CITIES[card].color));
   };
   sorted.forEach(c => box.append(cardEl(c, false)));
@@ -1395,7 +1397,7 @@ function colorize(msg) {
   return msg.split(LOG_RE).map((part, i) => {
     if (i % 2 === 0) return part;
     const color = CITIES[part] ? CITIES[part].color : part;
-    return h('span', { class: CITIES[part] ? 'lc' : 'ld', style: { color: LOG_TEXT[color] } }, part);
+    return h('span', { class: CITIES[part] ? 'lc' : 'ld', style: { color: LOG_TEXT[color] } }, CITIES[part] ? nm(part) : part);
   });
 }
 
