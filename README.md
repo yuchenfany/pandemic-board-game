@@ -10,7 +10,7 @@ engine and relays the game to everyone else over WebRTC (peer-to-peer via [PeerJ
 
 1. Open the site, enter your name, **Create a new room**.
 2. Send the invite link (`…/?room=CODE`) to your friends.
-3. Everyone picks a role (or Random); the host picks the difficulty and starts.
+3. Everyone picks a role (or Random); the host picks the board and difficulty, then starts.
 
 - **Hotseat:** in the lobby, anyone can **Add player on this device** to control more than one role from a single screen. You can mix this with online players, or play solo with 2–5 roles and no one else. The screen switches to whichever of your players has to act. You can also switch by hand (buttons next to your hand, or click one of your players in the side panel), for example to play an event from another hand.
 - The host must keep their tab open. Refreshing is safe because the game is saved in the host's browser and everyone reconnects automatically.
@@ -53,7 +53,10 @@ This is a browser-local habit aid; clearing site storage or changing the device 
 - If you go over the hand limit, click cards to discard them before play continues.
 
 ## What's included
-- Full base game with a twist: **Austin** replaces Atlanta (start city) and **Boston** replaces New York. Same colors and connections. 48 cities, outbreak chains, epidemics, eradication, 6-station limit, 7-card hand limit, every win/loss condition.
+- Full base game with a twist: 15 of the 48 cities are swapped for others nearby (e.g. **Austin** replaces Atlanta as the start city, **Boston** replaces New York). Same colors and connections. Outbreak chains, epidemics, eradication, 6-station limit, 7-card hand limit, every win/loss condition.
+- **Two boards** (host picks in the lobby):
+  - **World cities**: the classic world map.
+  - **Universities**: 48 research universities on a US + Canada map. It is the cities board's exact graph (every school takes one city's slot: same color, same connections), so it plays identically, but each color is one region: red = West Coast, yellow = Mountain/Midwest (plus UBC), blue = South (plus UMaryland and JHU), black = Northeast (plus UToronto and McGill). **Texas A&M** is the start (Atlanta's slot). The dashed links that leave the map edge are coast-to-coast flights, like the Pacific links on the world board. To change schools, edit `tools/plan-universities.py`, rerun it, and paste its output into `data.js`.
 - 13 roles: 7 base (2nd ed.) + 6 On the Brink (Archivist, Containment Specialist, Epidemiologist, Field Operative, Generalist, Troubleshooter).
 - 13 events: 5 base + 8 On the Brink. Event count is configurable (default 2 per player, as OtB suggests).
 - Difficulty from Introductory (4 epidemics) up to Legendary (7).
@@ -78,15 +81,17 @@ This is a browser-local habit aid; clearing site storage or changing the device 
 ## Layout
 ```
 public/                 the whole site (served by GitHub Pages)
-  shared/data.js        cities, connections, roles, events
+  shared/data.js        boards (cities, connections), roles, events
   shared/engine.js      rules engine: pure state -> state, validates every action
   shared/room.js        lobby/room logic (runs in the host's browser)
   net.js                PeerJS transport: HostNet (authoritative) / GuestNet
   app.js, style.css     UI (vanilla JS + SVG map, no build step)
   shared/worldmap.js    generated world-map background (do not edit)
+  shared/usmap.js       generated US + Canada background for the universities board (do not edit)
   shared/photos.js      city photo credits (images in img/cities/)
 server.js               local static dev server only
-tools/build-worldmap.js regenerates worldmap.js (Natural Earth coastlines bent to the board with a thin-plate spline)
+tools/build-worldmap.js regenerates worldmap.js, or usmap.js with `universities` (Natural Earth coastlines bent to the board with a thin-plate spline)
+tools/plan-universities.py picks school positions and city slots for the universities board (Python + numpy)
 test/                   rules.js, room.js, sim.js
 ```
 

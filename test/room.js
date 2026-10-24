@@ -14,12 +14,18 @@ assert.deepStrictEqual(r.config.challenges, { virulent: false, mutation: true })
 assert(r.handle(a.token, 'config', { excludedRoles: ['generalist', 'bogus', 'generalist'] }).ok);
 assert.deepStrictEqual(r.config.excludedRoles, ['generalist'], 'excluded roles are validated and de-duplicated');
 assert(r.handle(b.token, 'config', { excludedRoles: [] }).error, 'only host excludes roles');
+assert(r.handle(a.token, 'config', { board: 'moon' }).ok);
+assert.strictEqual(r.config.board, 'cities', 'unknown boards are ignored');
+assert(r.handle(b.token, 'config', { board: 'universities' }).error, 'only host picks the board');
+assert(r.handle(a.token, 'config', { board: 'universities' }).ok);
 assert(r.handle(a.token, 'pickRole', { role: 'medic' }).ok);
 assert(r.handle(b.token, 'pickRole', { role: 'medic' }).error, 'role taken');
 assert(r.handle(b.token, 'start').error, 'only host starts');
 assert(r.handle(a.token, 'start').ok);
 assert.strictEqual(r.game.players[0].role, 'medic');
 assert.strictEqual(r.game.epidemics, 6);
+assert.strictEqual(r.game.board, 'universities');
+assert.deepStrictEqual(r.game.stations, ['Texas A&M']);
 assert(r.game.challenges.mutation && r.game.colors.includes('purple'));
 assert(r.handle(null, 'join', { name: 'Late' }).error, 'no new seats after start');
 assert.strictEqual(r.handle(null, 'join', { token: b.token }).token, b.token, 'rejoin by token');

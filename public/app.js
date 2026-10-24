@@ -1,7 +1,17 @@
 /* global PData, Engine, Room, HostNet, GuestNet, Bedtime */
 'use strict';
 const { CITIES, COLORS, COLOR_HEX, ROLES, EVENTS, DIFFICULTIES, EDGES, MAP_W, MAP_H } = PData;
-const CITY_NAMES = Object.keys(CITIES).sort();
+// CITIES / EDGES are the active board's (PData.useBoard swaps them in place); syncBoard follows the game's board.
+let CITY_NAMES = Object.keys(CITIES).sort();
+let namesBoard = PData.board;
+function syncBoard(g) {
+  if (g) Engine.syncBoard(g);
+  if (namesBoard === PData.board) return;
+  namesBoard = PData.board;
+  CITY_NAMES = Object.keys(CITIES).sort();
+  LOG_RE = logRe();
+  ui.prevCubes = null;
+}
 const ICON = { blue: '🔵', yellow: '🟡', black: '⚫', red: '🔴', purple: '🟣' };
 const gcolors = (g) => (g && g.colors) || COLORS;
 
@@ -129,6 +139,7 @@ function wire(n) {
   n.on('state', (data) => {
     const prevTurn = ui.game && ui.game.turnNo;
     ui.room = data.room; ui.game = data.game; ui.self = data.you; ui.mine = data.mine || [data.you];
+    syncBoard(ui.game);
     if (!ui.mine.includes(ui.you)) ui.you = ui.self;
     if (ui.game && ui.game.turnNo !== prevTurn) ui.pawn = null;
     focusSeat();
@@ -267,7 +278,8 @@ function boot() {
   if (sess && (!urlRoom || urlRoom === sess.code)) {
     const saved = sess.host ? HostNet.savedRoom(sess.code) : null;
     // A game saved by an older version (e.g. before cities were renamed) can't be resumed.
-    if (saved && saved.game && Object.keys(saved.game.cubes).some(c => !CITIES[c])) saved.game = null;
+    const savedCities = saved && saved.game && (PData.BOARDS[saved.game.board || PData.DEFAULT_BOARD] || {}).cities;
+    if (saved && saved.game && (!savedCities || Object.keys(saved.game.cubes).some(c => !savedCities[c]))) saved.game = null;
     if (sess.host && saved) return resumeHosting(sess, saved);
     if (!sess.host) return joinRoom(sess.code, { token: sess.token, name: store.get('pandemic:name') });
     setSession(null);
@@ -335,6 +347,9 @@ function renderLobby() {
   const diffSel = h('select', { disabled: !isHost, onchange: (e) => req('config', { epidemics: Number(e.target.value) }) },
     DIFFICULTIES.map(d => h('option', { value: d.epidemics }, `${d.name} — ${d.epidemics} epidemics`)));
   diffSel.value = cfg.epidemics;
+  const boardSel = h('select', { disabled: !isHost, onchange: (e) => req('config', { board: e.target.value }) },
+    Object.entries(PData.BOARDS).map(([key, b]) => h('option', { value: key }, b.name)));
+  boardSel.value = cfg.board || PData.DEFAULT_BOARD;
   const evSel = h('select', { disabled: !isHost, onchange: (e) => req('config', { eventsPerPlayer: Number(e.target.value) }) },
     [0, 1, 2, 3].map(n => h('option', { value: n }, `${n} per player${n === 2 ? ' (recommended)' : ''}`)));
   evSel.value = cfg.eventsPerPlayer;
@@ -390,6 +405,7 @@ function renderLobby() {
         seats,
         addLocalRow,
         h('h2', { style: { marginTop: '18px' } }, 'Settings'),
+        h('label', null, 'Board', boardSel),
         h('label', null, 'Difficulty', diffSel),
         h('label', null, 'Event cards', evSel),
         h('label', null, 'Challenges'), challenges,
@@ -419,10 +435,12 @@ function renderLobby() {
 // ------------------------------------------------------------ map
 
 let mapBuilt = false;
+let mapBoard = null;
 
 // Pandemic-board style continents: glowing coastline over a gridded blue landmass.
 function landLayers(id) {
-  const land = typeof WORLD_LAND === 'string' ? WORLD_LAND : '';
+  const g = typeof self !== 'undefined' ? self : window;
+  const land = typeof g[PData.BOARDS[PData.board].land] === 'string' ? g[PData.BOARDS[PData.board].land] : '';
   const defs = s('defs', null,
     s('linearGradient', { id: `${id}-land`, x1: 0, y1: 0, x2: 0, y2: 1 },
       s('stop', { offset: '0%', 'stop-color': '#24577a' }), s('stop', { offset: '100%', 'stop-color': '#173f5c' })),
@@ -441,6 +459,11 @@ const pawnEls = [];
 
 function buildMap() {
   const svg = $('#map');
+  svg.innerHTML = '';
+  for (const k of Object.keys(edgeEls)) delete edgeEls[k];
+  pawnEls.length = 0;
+  ui.prevCubes = null;
+  mapBoard = PData.board;
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   svg.append(...landLayers('m'));
   const edges = s('g');
@@ -462,7 +485,8 @@ function buildMap() {
     cities.append(g);
   });
   svg.append(edges, s('g', { id: 'xedges' }), s('g', { id: 'dyn', class: 'dyn' }), cities, s('g', { id: 'pawns' }), s('g', { id: 'fx', class: 'dyn' }));
-  setupPanZoom(svg);
+  if (!mapBuilt) setupPanZoom(svg);
+  Object.assign(ui.view, { x: 0, y: 0, w: MAP_W, h: MAP_H });
   applyView();
   mapBuilt = true;
 }
@@ -585,7 +609,7 @@ function hideTip() {
 }
 
 function renderMap(g, delays = {}) {
-  if (!mapBuilt) buildMap();
+  if (!mapBuilt || mapBoard !== PData.board) buildMap();
   renderLinks(g);
   const prev = ui.prevCubes;
   const reach = new Set();
@@ -1342,8 +1366,9 @@ function maybeOpenForecast(g) {
 // Colour city names (by their disease) and disease names in log lines.
 const LOG_TEXT = { blue: '#79adff', yellow: '#f2c230', black: '#b9c1cd', red: '#ff6e64', purple: '#c58cff' };
 const escapeRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const LOG_RE = new RegExp('(' + [...Object.keys(CITIES).sort((a, b) => b.length - a.length).map(escapeRe),
+const logRe = () => new RegExp('(' + [...Object.keys(CITIES).sort((a, b) => b.length - a.length).map(escapeRe),
   '\\bblue\\b', '\\byellow\\b', '\\bblack\\b', '\\bred\\b', '\\bpurple\\b'].join('|') + ')', 'g');
+let LOG_RE = logRe();
 function colorize(msg) {
   return msg.split(LOG_RE).map((part, i) => {
     if (i % 2 === 0) return part;

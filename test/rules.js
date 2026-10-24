@@ -447,4 +447,32 @@ test('custom events are only in the deck when enabled', () => {
   assert(!all(off).some(c => c === 'E:newRoute' || c === 'E:borderClosure'));
 });
 
+test('universities board is the cities board with schools in place of cities', () => {
+  const W = D.BOARDS.cities, U = D.BOARDS.universities;
+  const slot = U.slots; // school -> city
+  assert.strictEqual(Object.keys(U.cities).length, 48);
+  assert.deepStrictEqual(Object.values(slot).sort(), Object.keys(W.cities).sort(), 'one school per city');
+  Object.keys(U.cities).forEach(u => assert.strictEqual(U.cities[u].color, W.cities[slot[u]].color, `${u} color`));
+  const key = (a, b) => [a, b].sort().join('|');
+  const mapped = new Set(U.edges.map(([a, b]) => key(slot[a], slot[b])));
+  assert.strictEqual(U.edges.length, W.edges.length);
+  W.edges.forEach(([a, b]) => assert(mapped.has(key(a, b)), `${a}-${b} kept`));
+  assert.strictEqual(slot[U.start], W.start, 'start school sits in the start city slot');
+});
+
+test('a universities game starts at its own start and switches the active board', () => {
+  const g = E.createGame({ players: [{ name: 'A' }, { name: 'B' }], epidemics: 4, board: 'universities' });
+  assert.strictEqual(g.board, 'universities');
+  assert.deepStrictEqual(g.stations, ['Texas A&M']);
+  assert(g.players.every(p => p.location === 'Texas A&M'));
+  assert(D.CITIES['MIT'] && !D.CITIES['Paris'] && D.CITY_NAMES.length === 48);
+  assert.deepStrictEqual(E.adj(g, 'Texas A&M').sort(), ['Georgia Tech', 'UTSW', 'WashU']);
+  // Applying an action to a cities game switches back.
+  const c = E.createGame({ players: [{ name: 'A' }, { name: 'B' }], epidemics: 4 });
+  D.useBoard('universities');
+  E.apply(c, c.current, { type: 'pass' });
+  assert(D.CITIES['Paris'] && D.board === 'cities');
+  assert.throws(() => E.createGame({ players: [{ name: 'A' }, { name: 'B' }], board: 'moon' }), E.GameError);
+});
+
 console.log(`${passed} rule tests passed`);
