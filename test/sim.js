@@ -4,7 +4,7 @@ const E = require('../public/shared/engine');
 const D = require('../public/shared/data');
 
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
-const CITY_NAMES = Object.keys(D.CITIES);
+const CITY_NAMES = D.CITY_NAMES; // live: follows the board of the game being played
 
 function checkInvariants(s) {
   s.colors.forEach(c => {
@@ -103,8 +103,9 @@ function candidates(s) {
   return out;
 }
 
-function playOne(nPlayers, epidemics, challenges) {
+function playOne(nPlayers, epidemics, challenges, board) {
   let s = E.createGame({
+    board,
     players: Array.from({ length: nPlayers }, (_, i) => ({ name: 'P' + i })),
     epidemics,
     eventCount: 13,
@@ -151,9 +152,9 @@ const tally = {};
 let vsSeen = 0;
 for (let i = 0; i < N; i++) {
   const challenges = { virulent: i % 3 !== 0, mutation: i % 2 === 0 };
-  const s = playOne(2 + (i % 4), 4 + (i % 4), challenges);
+  const s = playOne(2 + (i % 4), 4 + (i % 4), challenges, i % 5 === 4 ? 'universities' : 'cities');
   if (s.challenges.virulent && s.vsPlayed.length) vsSeen += 1;
   const key = s.status === 'won' ? 'won' : s.result;
   tally[key] = (tally[key] || 0) + 1;
 }
-console.log(`Played ${N} random games (with/without Virulent Strain and Mutation) without errors; ${vsSeen} reached a Virulent Strain epidemic:`, tally);
+console.log(`Played ${N} random games (both boards, with/without Virulent Strain and Mutation) without errors; ${vsSeen} reached a Virulent Strain epidemic:`, tally);

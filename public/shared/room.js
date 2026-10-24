@@ -22,13 +22,15 @@
       this.code = code;
       this.seats = [];
       this.hostToken = null;
-      this.config = { epidemics: 5, eventsPerPlayer: 2, challenges: { virulent: false, mutation: false }, excludedRoles: [], customEvents: true };
+      this.config = { epidemics: 5, eventsPerPlayer: 2, challenges: { virulent: false, mutation: false }, excludedRoles: [], customEvents: true, board: D.DEFAULT_BOARD };
       this.game = null;
       this.chat = [];
       if (saved) Object.assign(this, saved, { code });
       this.config.challenges = this.config.challenges || { virulent: false, mutation: false };
       this.config.excludedRoles = this.config.excludedRoles || [];
       if (typeof this.config.customEvents !== 'boolean') this.config.customEvents = true;
+      if (!D.BOARDS[this.config.board]) this.config.board = D.DEFAULT_BOARD;
+      if (this.game) Engine.syncBoard(this.game);
     }
 
     toJSON() {
@@ -130,6 +132,7 @@
         });
       }
       if (typeof cfg.customEvents === 'boolean') this.config.customEvents = cfg.customEvents;
+      if (typeof cfg.board === 'string' && D.BOARDS[cfg.board]) this.config.board = cfg.board;
       if (Array.isArray(cfg.excludedRoles)) this.config.excludedRoles = [...new Set(cfg.excludedRoles.filter(k => D.ROLES[k]))];
     }
 
@@ -143,6 +146,7 @@
         challenges: this.config.challenges,
         excludedRoles: this.config.excludedRoles,
         customEvents: this.config.customEvents,
+        board: this.config.board,
       });
     }
 
