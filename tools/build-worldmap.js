@@ -4,6 +4,7 @@
 //    real location on the map (this enlarges Europe etc., much like the physical board).
 // Usage: node tools/build-worldmap.js            -> public/shared/worldmap.js (cities board)
 //        node tools/build-worldmap.js universities -> public/shared/usmap.js (US + Canada only)
+//        node tools/build-worldmap.js eastasia     -> public/shared/asiamap.js (East Asia only)
 // The universities board has several schools per metro area (e.g. Harvard and MIT), so its spline is
 // anchored on metro clusters (mean of real and board positions) instead of on every school.
 const fs = require('fs');
@@ -16,6 +17,7 @@ D.useBoard(BOARD);
 const SETUP = {
   cities: { file: 'worldmap.js', global: 'WORLD_LAND', res: '50m', cluster: 0, bbox: null },
   universities: { file: 'usmap.js', global: 'US_LAND', res: '10m', cluster: 0.6, bbox: [-150, 14, -45, 66] }, // lon/lat window
+  eastasia: { file: 'asiamap.js', global: 'ASIA_LAND', res: '10m', cluster: 0.6, bbox: [70, 12, 150, 56] },
 }[BOARD];
 
 const RES = process.env.RES || SETUP.res;

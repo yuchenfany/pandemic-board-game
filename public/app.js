@@ -589,7 +589,8 @@ function showTip(city) {
   const tip = $('#tip');
   tip.innerHTML = '';
   tip.append(...[
-    h('b', null, city), ' ', h('span', { class: 'muted' }, `· ${c.color}`),
+    h('b', null, city), ' ', c.zh ? h('span', { class: 'zh' }, c.zh) : null, ' ', h('span', { class: 'muted' }, `· ${c.color}`),
+    c.region ? h('div', { class: 'muted small' }, c.region) : null,
     h('div', null, cubes || h('span', { class: 'muted' }, 'No disease cubes')),
     g.stations.includes(city) ? h('div', null, '🏥 Research station') : null,
     here.length ? h('div', null, '👤 ', here.join(', ')) : null,
@@ -785,7 +786,8 @@ function infectCard(city, color, note, cls = '') {
   const ph = PHOTOS[city];
   strip.append(h('div', { class: `icard ${cls}`, style: { '--c': COLOR_HEX[color] || '#6b7a8f' } },
     ph ? h('div', { class: 'ph' }, h('img', { src: ph.src, alt: city }), h('small', null, `📷 ${ph.author} · ${ph.license}`)) : null,
-    h('div', { class: 'txt' }, h('b', null, city), h('span', null, note))));
+    h('div', { class: 'txt' }, h('b', null, city), CITIES[city] && CITIES[city].zh ? h('em', { class: 'zh' }, CITIES[city].zh) : null, h('span', null, note)),
+    CITIES[city] && CITIES[city].region ? h('div', { class: 'loc' }, CITIES[city].region) : null));
   while (strip.children.length > 6) strip.firstChild.remove();
   clearTimeout(stripTimer);
   stripTimer = setTimeout(() => { strip.innerHTML = ''; }, 3500);

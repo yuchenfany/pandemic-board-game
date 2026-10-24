@@ -152,9 +152,9 @@ const tally = {};
 let vsSeen = 0;
 for (let i = 0; i < N; i++) {
   const challenges = { virulent: i % 3 !== 0, mutation: i % 2 === 0 };
-  const s = playOne(2 + (i % 4), 4 + (i % 4), challenges, i % 5 === 4 ? 'universities' : 'cities');
+  const s = playOne(2 + (i % 4), 4 + (i % 4), challenges, ['cities', 'universities', 'eastasia'][i % 3]);
   if (s.challenges.virulent && s.vsPlayed.length) vsSeen += 1;
   const key = s.status === 'won' ? 'won' : s.result;
   tally[key] = (tally[key] || 0) + 1;
 }
-console.log(`Played ${N} random games (both boards, with/without Virulent Strain and Mutation) without errors; ${vsSeen} reached a Virulent Strain epidemic:`, tally);
+console.log(`Played ${N} random games (all three boards, with/without Virulent Strain and Mutation) without errors; ${vsSeen} reached a Virulent Strain epidemic:`, tally);

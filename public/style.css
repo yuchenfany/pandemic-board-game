@@ -336,6 +336,10 @@ a.link:hover { text-decoration: underline; }
 .ref .credits a { color: var(--accent); }
 #infectstrip .icard b { font-size: 15px; }
 #infectstrip .icard span { font-size: 12px; color: var(--muted); }
+/* East Asia board: simplified Chinese name next to the city, province underneath */
+.zh { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; font-style: normal; }
+#infectstrip .icard .zh { font-size: 15px; color: var(--text, #fff); }
+#infectstrip .icard .loc { font-size: 11px; color: var(--muted); margin-top: 1px; }
 #infectstrip .icard.ob { border-color: var(--danger); border-left-color: var(--c); }
 #infectstrip .icard.ob span { color: var(--danger); font-weight: 700; letter-spacing: 1px; }
 #infectstrip .icard.muted { opacity: .75; }

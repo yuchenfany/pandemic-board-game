@@ -447,9 +447,9 @@ test('custom events are only in the deck when enabled', () => {
   assert(!all(off).some(c => c === 'E:newRoute' || c === 'E:borderClosure'));
 });
 
-test('universities board is the cities board with schools in place of cities', () => {
-  const W = D.BOARDS.cities, U = D.BOARDS.universities;
-  const slot = U.slots; // school -> city
+for (const boardKey of ['universities', 'eastasia']) test(`${boardKey} board is the cities board with places in place of cities`, () => {
+  const W = D.BOARDS.cities, U = D.BOARDS[boardKey];
+  const slot = U.slots; // place -> city
   assert.strictEqual(Object.keys(U.cities).length, 48);
   assert.deepStrictEqual(Object.values(slot).sort(), Object.keys(W.cities).sort(), 'one school per city');
   // Colors may be renamed, but consistently: each slot color maps to exactly one school color.
@@ -464,7 +464,11 @@ test('universities board is the cities board with schools in place of cities', (
   const mapped = new Set(U.edges.map(([a, b]) => key(slot[a], slot[b])));
   assert.strictEqual(U.edges.length, W.edges.length);
   W.edges.forEach(([a, b]) => assert(mapped.has(key(a, b)), `${a}-${b} kept`));
-  assert.strictEqual(slot[U.start], W.start, 'start school sits in the start city slot');
+  assert.strictEqual(slot[U.start], W.start, 'start place sits in the start city slot');
+  Object.entries(U.cities).forEach(([name, c]) => {
+    assert(c.x >= 0 && c.x <= D.MAP_W && c.y >= 0 && c.y <= D.MAP_H, `${name} on the canvas`);
+    if (boardKey === 'eastasia') assert(c.region && /[\u4e00-\u9fff]/.test(c.zh), `${name} has a region and Chinese name`);
+  });
 });
 
 test('a universities game starts at its own start and switches the active board', () => {

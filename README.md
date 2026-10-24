@@ -54,9 +54,10 @@ This is a browser-local habit aid; clearing site storage or changing the device 
 
 ## What's included
 - Full base game with a twist: 15 of the 48 cities are swapped for others nearby (e.g. **Austin** replaces Atlanta as the start city, **Boston** replaces New York). Same colors and connections. Outbreak chains, epidemics, eradication, 6-station limit, 7-card hand limit, every win/loss condition.
-- **Two boards** (host picks in the lobby):
+- **Three boards** (host picks in the lobby):
   - **World cities**: the classic world map.
   - **Universities**: 48 research universities on a US + Canada map. It is the cities board's exact graph (every school takes one city's slot: same color, same connections), so it plays identically, but each color is one region: blue = West Coast, black = Mountain/Midwest (plus UBC), red = South (plus UMaryland and JHU), yellow = Northeast (plus UToronto and McGill). California is drawn extra large, using room the near-empty Mountain West doesn't need. **Texas A&M** is the start (Atlanta's slot). The dashed links that leave the map edge are coast-to-coast flights, like the Pacific links on the world board. To change schools, edit `tools/plan-universities.py`, rerun it, and paste its output into `data.js`.
+  - **China, Japan & Korea**: 48 cities on an East Asia map, on the same graph again. Colors are regions: blue = North (Beijing, Tianjin, Shandong, the Northeast, Xi'an), yellow = East (Shanghai, the Yangtze delta, Wuhan, Fujian, Wenzhou), black = South & West (Guangzhou, Shenzhen, Hong Kong, Sichuan, Yunnan, Tibet, Xinjiang), red = Japan & Korea. **Zhengzhou** is the start. Infection cards and hover tips show each city's simplified Chinese name and province. To change cities or provinces, edit `tools/plan-board.py eastasia`, rerun it and paste its output into `data.js`.
 - 13 roles: 7 base (2nd ed.) + 6 On the Brink (Archivist, Containment Specialist, Epidemiologist, Field Operative, Generalist, Troubleshooter).
 - 13 events: 5 base + 8 On the Brink. Event count is configurable (default 2 per player, as OtB suggests).
 - Difficulty from Introductory (4 epidemics) up to Legendary (7).
@@ -88,10 +89,12 @@ public/                 the whole site (served by GitHub Pages)
   app.js, style.css     UI (vanilla JS + SVG map, no build step)
   shared/worldmap.js    generated world-map background (do not edit)
   shared/usmap.js       generated US + Canada background for the universities board (do not edit)
+  shared/asiamap.js     generated East Asia background for the China/Japan/Korea board (do not edit)
   shared/photos.js      city photo credits (images in img/cities/)
 server.js               local static dev server only
 tools/build-worldmap.js regenerates worldmap.js, or usmap.js with `universities` (Natural Earth coastlines bent to the board with a thin-plate spline)
 tools/plan-universities.py picks school positions and city slots for the universities board (Python + numpy)
+tools/plan-board.py    same for the East Asia board (and a newer, general version of the universities planner)
 test/                   rules.js, room.js, sim.js
 ```
 
