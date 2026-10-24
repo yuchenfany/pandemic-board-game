@@ -11,12 +11,12 @@ Steps: real lat/lon -> stylised board positions (squeezes the empty Mountain Wes
 metros like Boston and LA), then simulated annealing over the assignment for each region->color
 mapping. It prints the UNIVERSITIES / UNIVERSITY_EDGES / UNIVERSITY_SLOTS blocks for
 public/shared/data.js (the start school is whichever lands in Austin's slot; update BOARDS.start).
-Positions were hand-nudged afterwards where labels overlapped (Virginia Tech, UMaryland).
+Labels that overlapped are fixed with NUDGE (before layout) and FIX (after layout).
 After changing positions, regenerate the background: node tools/build-worldmap.js universities
 
 Usage: python3 tools/plan-universities.py [seeds=6] [steps=200000]   (needs numpy and node; takes a few minutes)
 """
-import itertools, json, math, subprocess, sys
+import itertools, json, math, os, subprocess, sys
 import numpy as np
 
 SCHOOLS = {  # name: (lat, lon)
@@ -44,6 +44,9 @@ REGIONS = {
     'northeast': ['CMU', 'UToronto', 'McGill', 'UPenn', 'Princeton', 'Columbia', 'NYU', 'Cornell Tech', 'Cornell', 'Yale', 'Harvard', 'MIT'],
 }
 W, H = 1240, 660
+NUDGE = {'Utah': (0, 55)}  # extra offsets to the target positions, in px
+FIX = {'Virginia Tech': (878, 404), 'UMaryland': (1006, 392)}  # final positions forced after layout (label clean-up)
+COLOR_OF = {'west': 'blue', 'south': 'red', 'north/midwest': 'black', 'northeast': 'yellow'}  # display colors
 WRAP_COST, CROSS_COST, NEAR_COST = 250, 120, 150  # per wrap-around link / crossing pair / link grazing a school
 
 # ---- cities board graph (from data.js)
@@ -56,13 +59,19 @@ assert len(SCHOOLS) == len(nodes) == 48 and sorted(sum(REGIONS.values(), [])) ==
 # ---- layout: piecewise-linear lon/lat -> board, then push apart to >= 76px
 S = list(SCHOOLS); n = len(S)
 lat = np.array([SCHOOLS[s][0] for s in S]); lon = np.array([SCHOOLS[s][1] for s in S])
-T = np.stack([np.interp(lon, [-124, -117, -105, -93, -84, -76, -71], [45, 320, 500, 650, 840, 1015, 1190]),
-              np.interp(lat, [29.5, 33, 38, 42, 45.6, 49.3], [625, 545, 390, 215, 110, 45])], 1)
+# x: California gets the room the near-empty Mountain time zone doesn't need. y: the West Coast is
+# raised and stretched so its 11 California schools spread out.
+west = lon < -114
+T = np.stack([np.interp(lon, [-124, -117, -110, -105, -93, -84, -76, -71], [45, 430, 470, 530, 660, 840, 1015, 1190]),
+              np.where(west, np.interp(lat, [32.5, 34, 38.5, 47.7, 49.3], [500, 420, 260, 95, 40]),
+                       np.interp(lat, [29.5, 33, 38, 42, 45.6, 49.3], [625, 545, 390, 215, 110, 45]))], 1)
+T += np.array([NUDGE.get(s, (0, 0)) for s in S])
 P = T + np.random.default_rng(0).normal(0, 1, T.shape)
 for _ in range(5000):
     d = P[:, None] - P[None]; r = np.linalg.norm(d, axis=2) + np.eye(n) * 1e9
     P += (np.clip(76 - r, 0, None)[:, :, None] * d / r[:, :, None]).sum(1) * 0.25 + (T - P) * 0.015
     P[:, 0] = np.clip(P[:, 0], 40, W - 40); P[:, 1] = np.clip(P[:, 1], 38, H - 30)
+for name, xy in FIX.items(): P[S.index(name)] = xy
 P = P.round()
 
 # ---- geometry of every possible link (drawn across the map edge when that is shorter, like the Pacific)
@@ -112,19 +121,26 @@ def anneal(perm, seed, budget):
         else: f[u], f[v] = f[v], f[u]
     return cur, perm, f
 # Quick pass to pick which color goes to which region, then several full runs of the winner.
-perm = min((anneal(p, 0, steps // 4) for p in itertools.permutations(REGIONS)), key=lambda r: r[0])[1]
+# SLOTS fixes which slot color each region takes, in the order blue, yellow, black, red of the
+# cities board. The region in blue's slots gets the start (Austin's slot). The automatic choice is a
+# short trial per mapping, so it can miss the best one; this default gave 0 crossings.
+SLOTS = os.environ.get('SLOTS', 'south,north/midwest,northeast,west')  # SLOTS='' lets the script choose
+perm = tuple(SLOTS.split(',')) if SLOTS else \
+    min((anneal(p, 0, steps // 4) for p in itertools.permutations(REGIONS)), key=lambda r: r[0])[1]
 cur, perm, f = min((anneal(perm, s, steps) for s in range(seeds)), key=lambda r: r[0])
 sa, sb = f[Ea], f[Eb]; pid = PID[sa, sb]
 print(f'// {dict(zip(colors, perm))}  cost {cur:.0f}: length {L[sa, sb].sum():.0f}, wraps {WR[sa, sb].sum()}, '
       f'crossings {X[np.ix_(pid, pid)].sum() // 2}, grazes {NEAR[pid].sum():.0f}; start = {S[f[nodes.index("Austin")]]}', file=sys.stderr)
 
 school = {nodes[v]: S[f[v]] for v in range(n)}
+# Display colors come from COLOR_OF (a consistent renaming of the slot colors, so the game is unchanged).
 print('  const UNIVERSITIES = {')
-for c in colors:
+for k, c in enumerate(colors):
+    reg = perm[k]
     for v in sorted(byColor[c], key=lambda v: P[f[v]][0]):
         s = S[f[v]]; x, y = P[f[v]]
-        print(f"    '{s}': {{ color: '{c}', x: {x:.0f}, y: {y:.0f}, lat: {SCHOOLS[s][0]}, lon: {SCHOOLS[s][1]} }},")
-    if c != colors[-1]: print()
+        print(f"    '{s}': {{ color: '{COLOR_OF[reg]}', x: {x:.0f}, y: {y:.0f}, lat: {SCHOOLS[s][0]}, lon: {SCHOOLS[s][1]} }},")
+    if k < 3: print()
 print('  };\n  const UNIVERSITY_EDGES = [')
 edges = [f"['{school[a]}', '{school[b]}']" for a, b in O['E']]
 for i in range(0, len(edges), 4): print('    ' + ', '.join(edges[i:i + 4]) + ',')

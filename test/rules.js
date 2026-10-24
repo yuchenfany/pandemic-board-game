@@ -452,7 +452,14 @@ test('universities board is the cities board with schools in place of cities', (
   const slot = U.slots; // school -> city
   assert.strictEqual(Object.keys(U.cities).length, 48);
   assert.deepStrictEqual(Object.values(slot).sort(), Object.keys(W.cities).sort(), 'one school per city');
-  Object.keys(U.cities).forEach(u => assert.strictEqual(U.cities[u].color, W.cities[slot[u]].color, `${u} color`));
+  // Colors may be renamed, but consistently: each slot color maps to exactly one school color.
+  const rename = {};
+  Object.keys(U.cities).forEach(u => {
+    const from = W.cities[slot[u]].color;
+    rename[from] = rename[from] || U.cities[u].color;
+    assert.strictEqual(U.cities[u].color, rename[from], `${u} color`);
+  });
+  assert.strictEqual(new Set(Object.values(rename)).size, 4, 'color renaming is one-to-one');
   const key = (a, b) => [a, b].sort().join('|');
   const mapped = new Set(U.edges.map(([a, b]) => key(slot[a], slot[b])));
   assert.strictEqual(U.edges.length, W.edges.length);
