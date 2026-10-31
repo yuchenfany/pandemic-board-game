@@ -153,13 +153,14 @@ function candidates(s) {
   return out;
 }
 
-function playOne(nPlayers, epidemics, challenges) {
+function playOne(nPlayers, epidemics, challenges, mode) {
   let s = E.createGame({
     players: Array.from({ length: nPlayers }, (_, i) => ({ name: 'P' + i })),
     epidemics,
-    eventCount: 13,
+    eventCount: mode === 'team' ? 2 * nPlayers : 13,
     challenges,
     customEvents: Math.random() < 0.7,
+    mode: mode || 'coop',
   });
   checkInvariants(s);
   let steps = 0;
@@ -199,11 +200,17 @@ function playOne(nPlayers, epidemics, challenges) {
 const N = Number(process.argv[2] || 300);
 const tally = {};
 let vsSeen = 0;
+let teamSeen = 0;
 for (let i = 0; i < N; i++) {
-  const challenges = { virulent: i % 3 !== 0, mutation: i % 2 === 0, lab: i % 2 === 1 };
-  const s = playOne(2 + (i % 4), 4 + (i % 4), challenges);
+  // Every 4th game is a team game (4 or 6 players); the rest are co-op with mixed challenges.
+  const team = i % 4 === 3;
+  const mode = team ? 'team' : 'coop';
+  const challenges = team ? { virulent: i % 8 === 3 } : { virulent: i % 3 !== 0, mutation: i % 2 === 0, lab: i % 2 === 1 };
+  const nPlayers = team ? (i % 8 === 3 ? 6 : 4) : 2 + (i % 4);
+  const s = playOne(nPlayers, 4 + (i % 4), challenges, mode);
+  if (team) teamSeen += 1;
   if (s.challenges.virulent && s.vsPlayed.length) vsSeen += 1;
   const key = s.status === 'won' ? 'won' : s.result;
   tally[key] = (tally[key] || 0) + 1;
 }
-console.log(`Played ${N} random games (with/without Virulent Strain and Mutation) without errors; ${vsSeen} reached a Virulent Strain epidemic:`, tally);
+console.log(`Played ${N} random games (co-op + ${teamSeen} team) without errors; ${vsSeen} reached a Virulent Strain epidemic:`, tally);

@@ -243,6 +243,21 @@
     worldwidePanic: { name: 'Worldwide Panic', text: 'A harder Mutation scenario: 24 purple cubes, Mutation cards place 2 purple (not 1), extra purple seeded during setup, and the purple cure needs 2 cards from cities with purple cubes.' },
   };
 
+  // Team game Goal cards: prestige earned at game end. `per` multiplies game-end tallies
+  // (cure/erad = award markers the team holds; firstCure/firstErad = holding that marker;
+  // outbreakLeft = 8 minus outbreaks; deck5 = player-deck cards left / 5, rounded down).
+  // Exact card values aren't in the rulebook text, so this is a representative set.
+  const GOALS = [
+    { id: 'G1', name: 'Cure Specialists', per: { cure: 2, firstCure: 6 }, text: '2 prestige per cure; 6 for the first-cure award.' },
+    { id: 'G2', name: 'Rapid Response', per: { erad: 4, cure: 1, outbreakLeft: 1 }, text: '4 per eradication; 1 per cure; 1 per Outbreaks space left.' },
+    { id: 'G3', name: 'Efficient Research', per: { cure: 4, erad: 2, deck5: 1 }, text: '4 per cure; 2 per eradication; 1 per 5 cards left in the deck.' },
+    { id: 'G4', name: 'Steady Hands', per: { cure: 3, erad: 3 }, text: '3 per cure; 3 per eradication.' },
+    { id: 'G5', name: 'Trailblazers', per: { firstCure: 8, firstErad: 4, cure: 2 }, text: '8 for the first cure; 4 for the first eradication; 2 per cure.' },
+    { id: 'G6', name: 'Containment', per: { erad: 5, cure: 1 }, text: '5 per eradication; 1 per cure.' },
+  ];
+  const GOAL_BY_ID = Object.fromEntries(GOALS.map(g => [g.id, g]));
+  const BONUS_PRESTIGE = 1; // each Bonus card held at game end is worth this much
+
   const DIFFICULTIES = [
     { epidemics: 4, name: 'Introductory' },
     { epidemics: 5, name: 'Standard' },
@@ -250,5 +265,5 @@
     { epidemics: 7, name: 'Legendary' },
   ];
 
-  return { COLORS, COLOR_HEX, CITIES, MAP_W, MAP_H, EDGES, ADJ, ROLES, EVENTS, VIRULENT, MUTATION_EVENTS, CHALLENGES, DIFFICULTIES, SEQUENCES, SEQ_BY_ID };
+  return { COLORS, COLOR_HEX, CITIES, MAP_W, MAP_H, EDGES, ADJ, ROLES, EVENTS, VIRULENT, MUTATION_EVENTS, CHALLENGES, DIFFICULTIES, SEQUENCES, SEQ_BY_ID, GOALS, GOAL_BY_ID, BONUS_PRESTIGE };
 }));

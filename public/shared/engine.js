@@ -5,7 +5,7 @@
   else root.Engine = factory(root.PData);
 }(typeof self !== 'undefined' ? self : this, function (D) {
   'use strict';
-  const { CITIES, ADJ, COLORS, ROLES, EVENTS, VIRULENT, MUTATION_EVENTS, SEQUENCES, SEQ_BY_ID } = D;
+  const { CITIES, ADJ, COLORS, ROLES, EVENTS, VIRULENT, MUTATION_EVENTS, SEQUENCES, SEQ_BY_ID, GOALS, GOAL_BY_ID, BONUS_PRESTIGE } = D;
   const CITY_NAMES = Object.keys(CITIES);
   const RATES = [2, 2, 2, 3, 3, 4, 4];
   const HAND_SIZE = { 2: 4, 3: 3, 4: 2, 5: 2 };
@@ -25,12 +25,14 @@
   const isEpidemic = (c) => typeof c === 'string' && c.startsWith('EPIDEMIC');
   const isMutationEvent = (c) => typeof c === 'string' && c.startsWith('ME:');
   const isMutationCard = (c) => typeof c === 'string' && c.startsWith('MUTATION');
+  const isBonus = (c) => typeof c === 'string' && c.startsWith('BONUS'); // team-game Bonus cards
   const vsKeyOf = (c) => (typeof c === 'string' && c.startsWith('EPIDEMIC-VS:') ? c.slice(12) : null);
   const eventKey = (c) => c.slice(2);
   function cardName(c) {
     if (isEvent(c)) return EVENTS[eventKey(c)].name;
     if (isMutationEvent(c)) return MUTATION_EVENTS[c.slice(3)].name;
     if (isMutationCard(c)) return 'Mutation';
+    if (isBonus(c)) return 'Bonus card';
     if (vsKeyOf(c)) return `Epidemic: ${VIRULENT[vsKeyOf(c)].name}`;
     if (isEpidemic(c)) return 'Epidemic';
     return c;
@@ -85,7 +87,9 @@
   function createGame({ players, epidemics = 5, eventCount, challenges = {}, excludedRoles = [], customEvents = false, mode = 'coop' }) {
     const n = players.length;
     const solo = mode === 'solo';
+    const team = mode === 'team';
     if (solo) { if (n !== 1) fail('The solo game is for 1 player'); }
+    else if (team) { if (n !== 4 && n !== 6) fail('The team game is for 4 or 6 players'); }
     else if (n < 2 || n > 5) fail('Pandemic needs 2 to 5 players');
     if (epidemics < 4 || epidemics > 7) fail('Epidemics must be 4-7');
     const mutation = !!challenges.mutation, virulent = !!challenges.virulent;
@@ -117,7 +121,7 @@
       links: { added: [], cut: [] }, // connections changed by New Route / Border Closure, as sorted [a, b] pairs
       stations: ['Austin'],
       cures: Object.fromEntries(colors.map(c => [c, 'none'])), // none | cured | eradicated
-      rateIdx: 0,
+      rateIdx: team ? 2 : 0, // team play starts the infection rate at 2
       outbreaks: 0,
       epidemics,
       playerDeck: [], // top of deck = end of array
@@ -138,6 +142,12 @@
       solo, // solo game: 1 human player plus the CDC
       cdc: null, // the CDC's face-up cards and state (solo only)
       removedRoles: [], // roles taken out of the game by the CDC's Reassign action
+      team, // team game: rival 2-player teams compete for prestige
+      teams: null, // [{ players:[a,b], station, goal, cures, erads, firstCure, firstErad }]
+      teamStations: {}, // city -> owning team index
+      curTeam: 0,
+      firstCureDone: false,
+      firstEradDone: false,
       status: 'playing',
       result: null,
       log: [],
@@ -190,7 +200,7 @@
       const events = shuffle(allEvents).slice(0, numEvents)
         .concat(customEvents ? Object.keys(EVENTS).filter(k => EVENTS[k].set === 'custom') : []).map(k => 'E:' + k);
       deck = shuffle(CITY_NAMES.concat(events));
-      const handSize = HAND_SIZE[n];
+      const handSize = team ? 2 : HAND_SIZE[n];
       s.players.forEach(p => { for (let i = 0; i < handSize; i++) p.hand.push(deck.pop()); });
     }
     if (mutation) deck = shuffle(deck.concat(Object.keys(MUTATION_EVENTS).map(k => 'ME:' + k)));
@@ -198,13 +208,16 @@
     const epidemicCards = virulent
       ? shuffle(Object.keys(VIRULENT)).slice(0, epidemics).map(k => 'EPIDEMIC-VS:' + k)
       : Array.from({ length: epidemics }, (_, i) => 'EPIDEMIC' + (i + 1));
-    // Split into piles (larger piles on top), shuffle an epidemic into each, stack them.
+    // Team game: one Bonus card is shuffled into each epidemic pile.
+    const bonusCards = team ? Array.from({ length: epidemics }, (_, i) => 'BONUS' + (i + 1)) : [];
+    // Split into piles (larger piles on top), shuffle an epidemic (and bonus) into each, stack them.
     const piles = [];
     const base = Math.floor(deck.length / epidemics), extra = deck.length % epidemics;
     let pos = 0;
     for (let i = 0; i < epidemics; i++) {
       const size = base + (i < extra ? 1 : 0);
-      piles.push(shuffle(deck.slice(pos, pos + size).concat([epidemicCards[i]])));
+      const extras = [epidemicCards[i]].concat(team ? [bonusCards[i]] : []);
+      piles.push(shuffle(deck.slice(pos, pos + size).concat(extras)));
       pos += size;
     }
     for (let i = piles.length - 1; i >= 0; i--) s.playerDeck.push(...piles[i]);
@@ -221,13 +234,75 @@
       placeSequence(s, 0, labDeck.pop()); // the first research line starts with a Sequence card
       log(s, 'Challenge: Lab — cures must be built in the lab before they can be discovered.');
     }
+    if (team) {
+      // Pair players by seating order; deal each team a Goal card and a team research station.
+      const goals = shuffle(GOALS.map(g => g.id));
+      const stationCities = pickTeamStations(s, n / 2);
+      s.teams = [];
+      for (let t = 0; t < n / 2; t++) {
+        const members = [t * 2, t * 2 + 1];
+        const station = stationCities[t];
+        s.teams.push({ players: members, station, goal: goals[t], cures: 0, erads: 0, firstCure: false, firstErad: false });
+        s.stations.push(station);
+        s.teamStations[station] = t;
+        members.forEach(i => { s.players[i].location = station; });
+        log(s, `Team ${t + 1} (${members.map(i => s.players[i].name).join(' & ')}) starts in ${station}. Goal: ${GOAL_BY_ID[goals[t]].name}.`);
+      }
+    }
+
     if (virulent) log(s, 'Challenge: Virulent Strain.');
     if (mutation) log(s, 'Challenge: Mutation (purple disease, 12 cubes).');
     s.players.forEach(p => log(s, `${p.name} is the ${ROLES[p.role].name}.`));
-    const first = Math.floor(Math.random() * n);
-    log(s, `${s.players[first].name} goes first.`);
-    startTurn(s, first);
+    if (team) {
+      s.curTeam = 0;
+      log(s, `Team 1 goes first.`);
+      startTeamTurn(s, 0);
+    } else {
+      const first = Math.floor(Math.random() * n);
+      log(s, `${s.players[first].name} goes first.`);
+      startTurn(s, first);
+    }
     return s;
+  }
+
+  // Pick k research-station cities at least 3 connections apart (and from Austin).
+  function pickTeamStations(s, k) {
+    const chosen = [];
+    for (const c of shuffle(Object.keys(CITIES))) {
+      if (c === 'Austin') continue;
+      if (pilotDistance(s, 'Austin', c) < 3) continue;
+      if (chosen.every(x => pilotDistance(s, x, c) >= 3)) chosen.push(c);
+      if (chosen.length === k) break;
+    }
+    // Fallback (should not happen on the standard map): fill from any far cities.
+    for (const c of shuffle(Object.keys(CITIES))) {
+      if (chosen.length === k) break;
+      if (c !== 'Austin' && !chosen.includes(c)) chosen.push(c);
+    }
+    return chosen;
+  }
+
+  const teamOf = (s, pid) => (s.teams ? s.teams.findIndex(t => t.players.includes(pid)) : -1);
+  // Who may take actions this turn: in team play, any member of the current team.
+  function canAct(s, pid) { return s.team ? teamOf(s, pid) === s.curTeam : pid === s.current; }
+  // A station a given pawn's team may use for Shuttle Flights / Discover a Cure.
+  function usableStation(s, city, pid) {
+    if (!s.stations.includes(city)) return false;
+    if (!s.team) return true;
+    const owner = s.teamStations[city];
+    return owner == null || owner === teamOf(s, pid); // Atlanta and regular stations are shared
+  }
+
+  function startTeamTurn(s, teamIdx) {
+    s.curTeam = teamIdx;
+    const tm = s.teams[teamIdx];
+    s.current = tm.players[0];
+    if (s.travelBan === teamIdx) { s.travelBan = null; log(s, 'Commercial Travel Ban has ended.'); }
+    expireEvents(s, (e) => (e.key === 'improvedSanitation' || e.key === 'infectionZoneBan') && tm.players.includes(e.owner));
+    const hasGeneralist = tm.players.some(i => s.players[i].role === 'generalist');
+    s.turn = { phase: 'actions', actionsLeft: 6 + (hasGeneralist ? 1 : 0), actionsTaken: 0, pending: [], flags: {} };
+    s.turnStart = null;
+    s.turnStart = JSON.parse(JSON.stringify(s));
   }
 
   function startTurn(s, idx) {
@@ -263,17 +338,43 @@
     s.turn.phase = 'over';
     log(s, `GAME OVER: ${reason}`);
   }
+  // Team play: prestige earned at game end from a team's Goal card, awards and Bonus cards.
+  function teamPrestige(s, t) {
+    const per = GOAL_BY_ID[t.goal].per;
+    let p = (per.cure || 0) * t.cures + (per.erad || 0) * t.erads;
+    p += (per.firstCure || 0) * (t.firstCure ? 1 : 0) + (per.firstErad || 0) * (t.firstErad ? 1 : 0);
+    p += (per.outbreakLeft || 0) * (MAX_OUTBREAKS - s.outbreaks);
+    p += (per.deck5 || 0) * Math.floor((s.playerDeck ? s.playerDeck.length : 0) / 5);
+    const bonus = t.players.reduce((n, i) => n + s.players[i].hand.filter(isBonus).length, 0);
+    return p + bonus * BONUS_PRESTIGE;
+  }
+
   // Win when the 4 standard diseases are cured and purple (if in play) is cured or off the board.
   function checkWin(s) {
     if (s.status !== 'playing') return;
-    if (!COLORS.every(c => s.cures[c] !== 'none')) return;
-    if (s.colors.includes('purple') && s.cures.purple === 'none' && boardCount(s, 'purple') > 0) return;
+    const eradCount = COLORS.filter(c => s.cures[c] === 'eradicated').length;
+    const teamTriple = s.team && eradCount >= 3; // team alt-win: cure & eradicate 3 diseases
+    if (!teamTriple) {
+      if (!COLORS.every(c => s.cures[c] !== 'none')) return;
+      if (s.colors.includes('purple') && s.cures.purple === 'none' && boardCount(s, 'purple') > 0) return;
+    }
     s.status = 'won';
     s.result = s.colors.includes('purple')
       ? (s.cures.purple !== 'none' ? 'All five diseases cured!' : 'All four cures discovered and no purple disease left!')
-      : 'All four cures discovered!';
+      : teamTriple ? 'Three diseases cured and eradicated!' : 'All four cures discovered!';
     s.turn.phase = 'over';
     log(s, `VICTORY! ${s.result}`);
+    if (s.team) {
+      const scores = s.teams.map((t, i) => ({ i, p: teamPrestige(s, t) }));
+      const top = Math.max(...scores.map(x => x.p));
+      const winners = scores.filter(x => x.p === top).map(x => x.i);
+      scores.forEach(x => log(s, `Team ${x.i + 1}: ${x.p} prestige.`));
+      s.teamScores = scores.map(x => x.p);
+      s.result += winners.length === 1
+        ? ` Team ${winners[0] + 1} wins with ${top} prestige!`
+        : ` Teams ${winners.map(i => i + 1).join(' & ')} tie at ${top} prestige!`;
+      log(s, s.result);
+    }
   }
 
   function removeCubes(s, city, color, n) {
@@ -288,6 +389,13 @@
       if (s.cures[color] === 'cured' && boardCount(s, color) === 0) {
         s.cures[color] = 'eradicated';
         log(s, `The ${color} disease has been ERADICATED!`);
+        // Team play: the team on turn earns the eradication award.
+        if (s.team && s.teams[s.curTeam]) {
+          const tm = s.teams[s.curTeam];
+          tm.erads++;
+          if (!s.firstEradDone) { tm.firstErad = true; s.firstEradDone = true; }
+          log(s, `Team ${s.curTeam + 1} earns the ${color} eradication award.`);
+        }
       }
     });
   }
@@ -403,8 +511,8 @@
         }
       });
     }
-    // Mobile Hospital: only when the current player drives/ferries into a city.
-    if (s.turn && s.turn.flags.mobileHospital && idx === s.current && method === 'drive') {
+    // Mobile Hospital: only when a player taking the current turn drives/ferries into a city.
+    if (s.turn && s.turn.flags.mobileHospital && canAct(s, idx) && method === 'drive') {
       const best = s.colors.filter(c => s.cubes[city][c] > 0).sort((a, b) => s.cubes[city][b] - s.cubes[city][a])[0];
       if (best) {
         removeCubes(s, city, best, 1);
@@ -443,7 +551,7 @@
   // Legal ways for `actorIdx` (the current player) to move `pawnIdx` to `to`.
   function getMoveOptions(s, actorIdx, pawnIdx, to) {
     const res = [];
-    if (!s.turn || s.turn.phase !== 'actions' || s.turn.actionsLeft <= 0 || actorIdx !== s.current) return res;
+    if (!s.turn || s.turn.phase !== 'actions' || s.turn.actionsLeft <= 0 || !canAct(s, actorIdx)) return res;
     const actor = s.players[actorIdx], pawn = s.players[pawnIdx];
     if (!actor || !pawn || !CITIES[to]) return res;
     const from = pawn.location;
@@ -465,11 +573,11 @@
     if (adj(s, from).includes(to)) return [{ method: 'drive', label: 'Drive / Ferry' }];
     if (has(to)) res.push({ method: 'direct', card: to, label: `Direct Flight (discard ${to})` });
     if (has(from)) res.push({ method: 'charter', card: from, label: `Charter Flight (discard ${from})` });
-    if (s.stations.includes(from) && s.stations.includes(to)) res.push({ method: 'shuttle', label: 'Shuttle Flight' });
+    if (usableStation(s, from, actorIdx) && usableStation(s, to, actorIdx)) res.push({ method: 'shuttle', label: 'Shuttle Flight' });
     if (dispatcher && s.players.some((q, i) => i !== pawnIdx && q.location === to)) {
       res.push({ method: 'dispatch', label: 'Dispatcher: move to a pawn' });
     }
-    if (own && actor.role === 'opsExpert' && !s.turn.flags.opsMove && s.stations.includes(from)) {
+    if (own && actor.role === 'opsExpert' && !s.turn.flags.opsMove && usableStation(s, from, actorIdx)) {
       const cards = actor.hand.filter(isCity);
       if (cards.length) res.push({ method: 'ops', cards, label: 'Operations Expert move (discard any City card)' });
     }
@@ -500,6 +608,7 @@
   function cardsNeededForCure(s, p, color, useSamples) {
     let n = p.role === 'scientist' ? 4 : 5;
     if (s.challenges && s.challenges.lab) n = p.role === 'scientist' ? 2 : 3; // Lab: 3 (not 5), Scientist 2
+    if (s.team && s.players.length === 6) n--; // 6-player team play needs 1 fewer card
     if (color && color === s.virulent && vsOn(s, 'complexMolecularStructure') && s.cures[color] === 'none') n++;
     n -= (s.activeEvents || []).filter(e => e.key === 'sequencingBreakthrough').length; // Sequencing Breakthrough
     if (useSamples) n -= 2;
@@ -513,7 +622,7 @@
   // ---------------------------------------------------------------- turn flow
 
   function requireActionTurn(s, pid) {
-    if (pid !== s.current) fail("It's not your turn");
+    if (!canAct(s, pid)) fail(s.team ? "It's not your team's turn" : "It's not your turn");
     if (s.turn.phase !== 'actions' || s.turn.actionsLeft <= 0) fail('No actions left this turn');
   }
 
@@ -666,7 +775,7 @@
   }
   function labBegin(s, pid, kind) {
     const p = s.players[pid];
-    if (pid !== s.current || !s.turn || s.turn.phase !== 'actions') fail('Only during your actions phase');
+    if (!canAct(s, pid) || !s.turn || s.turn.phase !== 'actions') fail('Only during your actions phase');
     requireLabStation(s, p);
     const free = labFreeSource(s, p, kind);
     if (!free && s.turn.actionsLeft <= 0) fail('No actions left this turn');
@@ -678,10 +787,11 @@
     else spendAction(s);
   }
 
+  // pending entries are { card, to } — `to` is the player who drew the card (teammates differ in team play).
   function continueDrawing(s) {
-    const p = s.players[s.current];
     while (s.turn.pending.length) {
-      const card = s.turn.pending.shift();
+      const { card, to } = s.turn.pending.shift();
+      const p = s.players[to];
       if (isEpidemic(card)) {
         resolveEpidemic(s, card, p);
         if (s.status !== 'playing') return;
@@ -701,9 +811,11 @@
 
   function drawPlayerCards(s) {
     if (s.playerDeck.length < 2) { lose(s, 'Not enough player cards left to draw.'); return; }
-    const drawn = [s.playerDeck.pop(), s.playerDeck.pop()];
+    // Team play: the two cards go to the two team members, in order; otherwise both to the current player.
+    const recips = s.team ? s.teams[s.curTeam].players : [s.current, s.current];
+    const drawn = [{ card: s.playerDeck.pop(), to: recips[0] }, { card: s.playerDeck.pop(), to: recips[1] }];
     // A Mutation Event is resolved before an Epidemic drawn at the same time.
-    if (isEpidemic(drawn[0]) && isMutationEvent(drawn[1])) drawn.reverse();
+    if (isEpidemic(drawn[0].card) && isMutationEvent(drawn[1].card)) drawn.reverse();
     s.turn.pending = drawn;
     continueDrawing(s);
   }
@@ -750,6 +862,12 @@
       return;
     }
     s.turnNo++;
+    if (s.team) {
+      const next = (s.curTeam + 1) % s.teams.length;
+      startTeamTurn(s, next);
+      log(s, `--- Team ${next + 1}'s turn (${s.teams[next].players.map(i => s.players[i].name).join(' & ')}) ---`);
+      return;
+    }
     startTurn(s, (s.current + 1) % s.players.length);
     log(s, `--- ${s.players[s.current].name}'s turn ---`);
   }
@@ -846,11 +964,12 @@
         const city = validCity(prm.city);
         if (s.stations.includes(city)) fail('There is already a research station there');
         if (s.stations.length >= MAX_STATIONS) {
+          if (s.team && s.teamStations[prm.remove] != null) fail('Team research stations cannot be moved');
           if (!removeOne(s.stations, prm.remove)) fail('All 6 stations are built — pick one to remove');
         }
         s.stations.push(city);
         log(s, `Research station built in ${city}.`);
-        if (s.challenges.lab && pid === s.current && s.turn.phase === 'actions') {
+        if (s.challenges.lab && canAct(s, pid) && s.turn.phase === 'actions') {
           s.turn.flags.labBonus = true;
           log(s, `${p.name} may do 1 free lab action.`);
         }
@@ -900,8 +1019,9 @@
         s.turn.actionsLeft += 2;
         break;
       case 'commercialTravelBan':
-        s.travelBan = s.current;
-        log(s, `The infection rate is 1 until ${s.players[s.current].name}'s next turn begins.`);
+        s.travelBan = s.team ? s.curTeam : s.current;
+        log(s, s.team ? `The infection rate is 1 until Team ${s.curTeam + 1}'s next turn begins.`
+          : `The infection rate is 1 until ${s.players[s.current].name}'s next turn begins.`);
         break;
       case 'mobileHospital':
         s.turn.flags.mobileHospital = true;
@@ -1045,6 +1165,7 @@
         if (s.stations.includes(here)) fail('There is already a research station here');
         if (p.role !== 'opsExpert') discardFromHand(s, p, here);
         if (s.stations.length >= MAX_STATIONS) {
+          if (s.team && s.teamStations[a.remove] != null) fail('Team research stations cannot be moved');
           if (!removeOne(s.stations, a.remove)) fail('All 6 stations are built — pick one to remove');
         }
         s.stations.push(here);
@@ -1089,19 +1210,23 @@
         requireActionTurn(s, pid);
         const ok = getShareOptions(s, pid).some(o => o.mode === a.mode && o.other === a.other && o.card === a.card);
         if (!ok) fail('That card cannot be shared');
+        // Team play: sharing across teams takes 2 actions (incompatible protocols); within a team, 1.
+        const crossTeam = s.team && teamOf(s, a.other) !== teamOf(s, pid);
+        if (crossTeam && s.turn.actionsLeft < 2) fail('Sharing with another team takes 2 actions');
         const q = s.players[a.other];
         const [giver, taker] = a.mode === 'give' ? [p, q] : [q, p];
         removeOne(giver.hand, a.card);
         taker.hand.push(a.card);
-        log(s, `${giver.name} gave ${a.card} to ${taker.name}.`);
+        log(s, `${giver.name} gave ${a.card} to ${taker.name}.` + (crossTeam ? ' (across teams: 2 actions)' : ''));
         spendAction(s);
+        if (crossTeam) spendAction(s);
         break;
       }
       case 'cure': {
         requireActionTurn(s, pid);
         const color = a.color;
         if (!s.colors.includes(color)) fail('Pick a color');
-        if (!s.stations.includes(here)) fail('You must be at a research station');
+        if (!usableStation(s, here, pid)) fail(s.team ? 'You must be at a station your team can use' : 'You must be at a research station');
         if (s.cures[color] !== 'none') fail('That disease is already cured');
         // Lab: a standard disease can only be cured once its research line is complete.
         let labLine = -1;
@@ -1141,6 +1266,13 @@
         used.forEach(c => discardFromHand(s, p, c));
         if (useSamples) { p.samples[color] -= 3; s.supply[color] += 3; }
         s.cures[color] = 'cured';
+        // Team play: the curing team earns the cure award (and the first-cure award, once).
+        if (s.team && s.teams[s.curTeam]) {
+          const tm = s.teams[s.curTeam];
+          tm.cures++;
+          if (!s.firstCureDone) { tm.firstCure = true; s.firstCureDone = true; }
+          log(s, `Team ${s.curTeam + 1} earns the ${color} cure award${tm.firstCure && s.firstCureDone && tm.cures === 1 ? ' (and first cure!)' : ''}.`);
+        }
         // Sequencing Breakthrough is spent once the next cure is discovered.
         expireEvents(s, (e) => e.key === 'sequencingBreakthrough');
         // Lab: retire the completed research line's Sequence card and open a fresh one.
@@ -1197,7 +1329,7 @@
         break;
       }
       case 'epidemiologistTake': {
-        if (pid !== s.current || s.turn.phase !== 'actions') fail('Only during your actions phase');
+        if (!canAct(s, pid) || s.turn.phase !== 'actions') fail('Only during your actions phase');
         if (p.role !== 'epidemiologist') fail('Only the Epidemiologist can do that');
         if (s.turn.flags.epidemiologist) fail('Already used this turn');
         const q = s.players[a.from];
@@ -1224,7 +1356,7 @@
         break;
       }
       case 'fieldDirectorMove': {
-        if (pid !== s.current || s.turn.phase !== 'actions') fail('Only during your actions phase');
+        if (!canAct(s, pid) || s.turn.phase !== 'actions') fail('Only during your actions phase');
         if (p.role !== 'fieldDirector') fail('Only the Field Director can do that');
         if (s.turn.flags.fieldDirector) fail('Already used this turn');
         const i = validPawn(s, a.pawn);
@@ -1508,7 +1640,7 @@
         endCdcPhase(s);
         break;
       case 'restartTurn': {
-        if (pid !== s.current) fail("It's not your turn");
+        if (!canAct(s, pid)) fail("It's not your turn");
         if (!canRestart(s)) fail(s.turn.flags.revealed ? 'Cannot restart after hidden cards were revealed (Forecast)' : 'Nothing to restart');
         const snap = s.turnStart;
         const { logCount } = s;
@@ -1518,7 +1650,7 @@
         break;
       }
       case 'endActions':
-        if (pid !== s.current) fail("It's not your turn");
+        if (!canAct(s, pid)) fail("It's not your turn");
         if (s.turn.phase !== 'actions') fail('Your actions are already over');
         log(s, s.turn.actionsLeft > 0 ? `${p.name} ended their turn early.` : `${p.name} ended their actions.`);
         s.turn.actionsLeft = 0;
@@ -1526,18 +1658,18 @@
         drawPlayerCards(s); // drawn straight away; events can still be played before Infect
         break;
       case 'draw':
-        if (pid !== s.current || s.turn.phase !== 'draw') fail('Not time to draw');
+        if (!canAct(s, pid) || s.turn.phase !== 'draw') fail('Not time to draw');
         drawPlayerCards(s);
         break;
       case 'continue':
-        if (pid !== s.current || s.turn.phase !== 'epidemic') fail('Nothing to continue');
+        if (!canAct(s, pid) || s.turn.phase !== 'epidemic') fail('Nothing to continue');
         s.infectionDeck.push(...shuffle(s.infectionDiscard));
         s.infectionDiscard = [];
         log(s, 'Intensify: infection discards shuffled onto the infection deck.');
         continueDrawing(s);
         break;
       case 'infect':
-        if (pid !== s.current || s.turn.phase !== 'infect') fail('Not time to infect');
+        if (!canAct(s, pid) || s.turn.phase !== 'infect') fail('Not time to infect');
         infectPhase(s);
         break;
       case 'discard':
@@ -1587,8 +1719,9 @@
 
   return {
     GameError, createGame, apply, view, adj, getMoveOptions, getShareOptions, cardsNeededForCure, cureCards, leaveBlocked,
-    isCity, isEvent, isEpidemic, isMutationEvent, isMutationCard, vsKeyOf, eventKey, cardName, handLimit,
+    isCity, isEvent, isEpidemic, isMutationEvent, isMutationCard, isBonus, vsKeyOf, eventKey, cardName, handLimit,
     RATES, MAX_STATIONS, MAX_OUTBREAKS, infectAdj,
     labLineComplete: lineComplete, labSpotNeed: spotNeed, labSpotAccepts: spotAccepts,
+    teamOf, canAct, usableStation,
   };
 }));

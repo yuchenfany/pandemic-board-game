@@ -1,7 +1,7 @@
 # Pandemic: On the Brink — Online
 
-A multiplayer browser version of Pandemic (2nd edition rules) with the **On the Brink** and **In the Lab** roles, events and challenges.
-2–5 players, real-time, one shared board.
+A multiplayer browser version of Pandemic (2nd edition rules) with the **On the Brink** and **In the Lab** roles, events, challenges and game modes.
+1–6 players (solo, co-op or team), real-time, one shared board.
 
 ## Play online (GitHub Pages)
 
@@ -52,6 +52,7 @@ To test multiplayer locally, add hotseat players in the lobby, or open two brows
   - **New Route**: connect 2 cities of the same color. Pawns can Drive/Ferry along it, but outbreaks do not spread along it.
   - **Border Closure**: remove up to 2 connections. No driving across them, and outbreaks stop there.
   Both last for the rest of the game and show on the map (dashed gold = new route, red ✕ = closed).
+- **Team game** (lobby Mode → Team, 4 or 6 players): rival 2-player teams race for prestige. Each team shares 6 actions per turn (Generalist adds 1), has its own research station (owner-only for Shuttle/cure), a Goal card (shown to everyone — true secrecy isn't possible online), and earns award markers for cures/eradications plus Bonus cards shuffled into the deck. The infection rate starts at 2; in 6-player games cures need 1 fewer card. All teams win or lose together by the normal rules, then the team with the most prestige wins. *Simplified:* teams act from a shared 6-action pool in any split/order; Goal and Bonus cards are a representative set (`GOALS` in `data.js`); teams are formed by seat order and team stations are auto-placed.
 - **Solo game** (lobby Mode → Solo): play alone with help from the CDC. After you infect each turn, the CDC takes 1 action — move your pawn, reassign your role, exchange a card, draw a Player card (its own 7-card hand), or cure by discarding 5 same-color cards. Difficulty seeds 8/12/14/16 cards into the discard pile; Dispatcher/Researcher/Epidemiologist/Local Liaison are set aside.
 - **Random roles**: the host can exclude roles that Random may hand out. Players can still pick excluded roles themselves.
 - Up to 5 players, game log, team chat, reconnect.

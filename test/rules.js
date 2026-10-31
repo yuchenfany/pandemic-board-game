@@ -769,4 +769,81 @@ test('solo: the CDC must discard down to 7 after drawing', () => {
   assert.strictEqual(s.turn.phase, 'actions', 'phase ends once back to 7');
 });
 
+// ---------------------------------------------------------------- Team game
+
+function teamGame(n, mode) {
+  const roles = ['scientist', 'medic', 'opsExpert', 'quarantineSpecialist', 'containmentSpecialist', 'troubleshooter'];
+  return E.createGame({ players: Array.from({ length: n }, (_, i) => ({ name: 'P' + i, role: roles[i] })), epidemics: 5, mode: 'team' });
+}
+
+test('team: setup — teams, stations, rate 2, shared 6 actions, bonus cards', () => {
+  const s = teamGame(4);
+  assert(s.team);
+  assert.strictEqual(s.teams.length, 2);
+  assert.deepStrictEqual(s.teams[0].players, [0, 1]);
+  assert.strictEqual(s.rateIdx, 2, 'infection rate starts at 2');
+  assert.strictEqual(s.turn.actionsLeft, 6, 'a team shares 6 actions');
+  assert.strictEqual(s.playerDeck.filter(E.isBonus).length, 5, 'one Bonus card per epidemic');
+  s.players.forEach(p => assert.strictEqual(p.hand.length, 2, 'team deals 2 cards each'));
+  assert.strictEqual(s.players[0].location, s.teams[0].station);
+  assert.strictEqual(s.players[1].location, s.teams[0].station);
+  assert.notStrictEqual(s.teams[0].station, s.teams[1].station);
+});
+
+test('team: either teammate acts; opponents cannot; the turn passes to the next team', () => {
+  let s = teamGame(4);
+  s.curTeam = 0;
+  s = E.apply(s, 0, { type: 'move', to: E.adj(s, s.players[0].location)[0], method: 'drive' });
+  assert.strictEqual(s.turn.actionsLeft, 5);
+  s = E.apply(s, 1, { type: 'move', to: E.adj(s, s.players[1].location)[0], method: 'drive' });
+  assert.strictEqual(s.turn.actionsLeft, 4, 'both teammates spend from the shared pool');
+  expectFail(() => E.apply(s, 2, { type: 'move', to: E.adj(s, s.players[2].location)[0], method: 'drive' }), /not your team/);
+  s.playerDeck.push('Nanjing', 'Wuhan');
+  s = E.apply(s, 0, { type: 'endActions' });
+  assert.strictEqual(s.turn.phase, 'infect');
+  assert.strictEqual(s.players[0].hand.length + s.players[1].hand.length, 6, 'each teammate drew 1');
+  s = E.apply(s, 0, { type: 'infect' });
+  assert.strictEqual(s.curTeam, 1, 'next team');
+  assert.strictEqual(s.turn.actionsLeft, 6);
+});
+
+test('team: cross-team Share costs 2 actions; team stations are owner-only', () => {
+  let s = teamGame(4);
+  s.curTeam = 0;
+  s.players[2].location = s.players[0].location; // opponent in the same city
+  s.players[0].hand = ['Tokyo', 'Paris']; // Researcher? no — give the city-matching one
+  s.players[0].location = 'Tokyo'; s.players[2].location = 'Tokyo';
+  s = E.apply(s, 0, { type: 'share', mode: 'give', other: 2, card: 'Tokyo' });
+  assert(s.players[2].hand.includes('Tokyo'));
+  assert.strictEqual(s.turn.actionsLeft, 4, 'across teams: 2 actions');
+  assert(!E.usableStation(s, s.teams[0].station, 2), 'opponents cannot use a team station');
+  assert(E.usableStation(s, 'Austin', 2), 'Atlanta is shared');
+});
+
+test('team: 6-player cure discount and the cure award', () => {
+  let s = teamGame(6);
+  s.curTeam = 0;
+  assert.strictEqual(E.cardsNeededForCure(s, s.players[0], 'red', false), 3, 'Scientist, 6-player team needs 3');
+  s.players[0].location = s.teams[0].station;
+  s.players[0].hand = ['Tokyo', 'Seoul', 'Beijing'];
+  s = E.apply(s, 0, { type: 'cure', color: 'red', cards: ['Tokyo', 'Seoul', 'Beijing'] });
+  assert.notStrictEqual(s.cures.red, 'none');
+  assert.strictEqual(s.teams[0].cures, 1);
+  assert(s.teams[0].firstCure);
+});
+
+test('team: game end totals prestige and names the winner', () => {
+  let s = teamGame(4);
+  s.cures.blue = s.cures.yellow = s.cures.black = 'cured';
+  s.teams[0].cures = 3; s.teams[0].firstCure = true; s.firstCureDone = true;
+  s.teams[0].goal = 'G5'; s.teams[1].goal = 'G4';
+  s.curTeam = 0;
+  s.players[0].location = s.teams[0].station;
+  s.players[0].hand = ['Tokyo', 'Seoul', 'Beijing', 'Osaka']; // Scientist, 4-player team needs 4
+  s = E.apply(s, 0, { type: 'cure', color: 'red', cards: ['Tokyo', 'Seoul', 'Beijing', 'Osaka'] });
+  assert.strictEqual(s.status, 'won');
+  assert(Array.isArray(s.teamScores) && s.teamScores[0] > s.teamScores[1]);
+  assert(/Team 1 wins/.test(s.result));
+});
+
 console.log(`${passed} rule tests passed`);

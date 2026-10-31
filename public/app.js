@@ -309,6 +309,7 @@ function renderLobby() {
     h('span', { class: 'dot' + (seat.connected ? ' on' : '') }),
     h('span', { class: 'name' }, seat.name, i === ui.self ? h('span', { class: 'muted' }, ' (you)') : '',
       i === r.host ? h('span', { class: 'tag' }, 'host') : null,
+      (r.config.mode === 'team') ? h('span', { class: 'tag' }, `Team ${Math.floor(i / 2) + 1}`) : null,
       seat.owner >= 0 ? h('span', { class: 'tag', title: `Plays on ${r.seats[seat.owner].name}'s device` }, `hotseat · ${r.seats[seat.owner].name}`) : null),
     h('span', { class: 'rolename' }, seat.role ? [h('span', { class: 'pawnchip', style: { background: ROLES[seat.role].color } }), ROLES[seat.role].name] : 'Random role'),
     seat.owner === ui.self ? h('button', { class: 'ghost small', title: 'Remove this player', onclick: () => req('removeLocal', { seat: i }) }, '✕') : null));
@@ -324,7 +325,8 @@ function renderLobby() {
   };
   localName.addEventListener('keydown', (e) => { if (e.key === 'Enter') addLocal(); });
   const mode = r.config.mode || 'coop';
-  const addLocalRow = (r.seats.length < 5 && mode !== 'solo') ? h('div', null,
+  const maxSeats = mode === 'team' ? 6 : 5;
+  const addLocalRow = (r.seats.length < maxSeats && mode !== 'solo') ? h('div', null,
     h('div', { class: 'row', style: { marginTop: '8px' } }, localName, h('button', { onclick: addLocal }, '+ Add player on this device')),
     h('p', { class: 'fine' }, 'Hotseat: extra players share your screen. It switches to whoever has to act.')) : null;
   const seatTabs = hotseat() ? h('div', { class: 'seat-tabs' }, h('span', { class: 'muted small' }, 'Choosing for:'),
@@ -395,7 +397,7 @@ function renderLobby() {
         h('div', { class: 'invite' },
           h('input', { value: link, readonly: true, onclick: (e) => e.target.select() }),
           h('button', { onclick: () => { navigator.clipboard.writeText(link).then(() => toast('Invite link copied', 'info')); } }, 'Copy link')),
-        h('h2', null, `Players (${r.seats.length}/5)`),
+        h('h2', null, `Players (${r.seats.length}/${maxSeats})`),
         seats,
         addLocalRow,
         h('h2', { style: { marginTop: '18px' } }, 'Settings'),
@@ -607,7 +609,7 @@ function renderMap(g, delays = {}) {
   renderLinks(g);
   const prev = ui.prevCubes;
   const reach = new Set();
-  const myTurn = g.current === ui.you && g.turn.phase === 'actions' && g.status === 'playing';
+  const myTurn = isActing(g) && g.turn.phase === 'actions' && g.status === 'playing';
   if (myTurn) {
     const pawn = selectedPawn(g);
     CITY_NAMES.forEach(c => { if (Engine.getMoveOptions(g, ui.you, pawn, c).length) reach.add(c); });
@@ -672,6 +674,9 @@ function renderMap(g, delays = {}) {
   });
 }
 
+// Whether the focused seat may take actions now (in team play, any member of the current team).
+function isActing(g) { return !!g && (g.team ? Engine.teamOf(g, ui.you) === g.curTeam : g.current === ui.you); }
+
 function selectedPawn(g) {
   const me = g.players[ui.you];
   const canOthers = me.role === 'dispatcher' || g.turn.flags.specialOrders != null;
@@ -683,7 +688,7 @@ function selectedPawn(g) {
 function onCityClick(city) {
   const g = ui.game;
   if (!g) return;
-  if (g.current !== ui.you || g.turn.phase !== 'actions' || g.status !== 'playing') return;
+  if (!isActing(g) || g.turn.phase !== 'actions' || g.status !== 'playing') return;
   const pawn = selectedPawn(g);
   const opts = Engine.getMoveOptions(g, ui.you, pawn, city);
   const blocked = Engine.leaveBlocked(g, pawn);
@@ -895,6 +900,9 @@ const chip = (card, opts = {}) => {
     const vs = Engine.vsKeyOf(card) && PData.VIRULENT[Engine.vsKeyOf(card)];
     return h('span', { class: 'chip', style: { background: '#7a1d17' }, ...(vs ? vsTip(Engine.vsKeyOf(card)) : {}) }, '☣ ' + Engine.cardName(card));
   }
+  if (Engine.isBonus(card)) {
+    return h('span', { class: 'chip', style: { background: '#8a6d1f' }, 'data-tip': 'Team game: held at game end, this Bonus card is worth prestige.' }, '✦ Bonus');
+  }
   if (Engine.isEvent(card)) {
     const ev = EVENTS[Engine.eventKey(card)];
     return h('span', { class: 'chip event' + (opts.onclick ? ' clickable' : ''), 'data-tip': ev.text, 'data-tip-title': ev.name, onclick: opts.onclick }, '★ ' + ev.name);
@@ -1035,21 +1043,41 @@ function showHelp() {
   [h('button', { onclick: closeModal }, 'Close')]);
 }
 
+function teamPrestige(g, t) {
+  const per = PData.GOAL_BY_ID[t.goal].per;
+  let p = (per.cure || 0) * t.cures + (per.erad || 0) * t.erads
+    + (per.firstCure || 0) * (t.firstCure ? 1 : 0) + (per.firstErad || 0) * (t.firstErad ? 1 : 0)
+    + (per.outbreakLeft || 0) * (8 - g.outbreaks)
+    + (per.deck5 || 0) * Math.floor((g.playerDeckCount || 0) / 5);
+  const bonus = t.players.reduce((n, i) => n + g.players[i].hand.filter(Engine.isBonus).length, 0);
+  return p + bonus * (PData.BONUS_PRESTIGE || 1);
+}
+
 function renderPlayers(g) {
   const box = $('#players');
   box.innerHTML = '';
   g.players.forEach((p, i) => {
+    if (g.team && g.teams.some(t => t.players[0] === i)) {
+      const ti = Engine.teamOf(g, i), t = g.teams[ti];
+      const goal = PData.GOAL_BY_ID[t.goal];
+      box.append(h('div', { class: 'team-head' + (ti === g.curTeam ? ' current' : '') },
+        h('b', null, `Team ${ti + 1}`), h('span', { class: 'muted small' }, `🏥 ${t.station}`),
+        h('span', { class: 'tag', 'data-tip': goal.text, 'data-tip-title': `Goal: ${goal.name}` }, `${goal.name} ⓘ`),
+        h('span', { class: 'prestige' }, `${teamPrestige(g, t)} prestige`),
+        h('span', { class: 'muted small' }, `${t.cures}✓ ${t.erads}★`)));
+    }
     const role = ROLES[p.role];
     const mine = isMine(i);
     const seat = ui.room.seats[i];
     const over = g.overLimit.includes(i);
+    const isCurrent = g.team ? Engine.teamOf(g, i) === g.curTeam : i === g.current;
     const canSwitch = mine && i !== ui.you;
-    box.append(h('div', { class: 'player' + (i === g.current ? ' current' : '') + (canSwitch ? ' switchable' : '') + (hotseat() && i === ui.you ? ' viewing' : ''),
+    box.append(h('div', { class: 'player' + (isCurrent ? ' current' : '') + (canSwitch ? ' switchable' : '') + (hotseat() && i === ui.you ? ' viewing' : ''),
       'data-idx': i, style: { '--rc': role.color }, title: canSwitch ? `Switch to ${p.name}` : null, onclick: canSwitch ? () => switchSeat(i) : null },
       h('div', { class: 'hdr' },
         h('span', { class: 'pawnchip', style: { background: role.color } }),
         h('span', { class: 'nm' }, p.name, mine ? h('span', { class: 'muted' }, hotseat() && i === ui.you ? ' (playing)' : ' (you)') : ''),
-        i === g.current ? h('span', { class: 'turn-tag' }, 'TURN') : null,
+        isCurrent ? h('span', { class: 'turn-tag' }, 'TURN') : null,
         h('span', { class: 'dot' + (seat && seat.connected ? ' on' : ''), title: seat && seat.connected ? 'online' : 'offline' }),
         h('span', { class: 'loc' }, '📍 ', p.location)),
       h('div', { class: 'role' }, h('b', roleTip(p.role), role.name, ' ⓘ'), ' · ',
@@ -1084,23 +1112,22 @@ function renderHand(g) {
       class: i === ui.you ? 'primary' : '', title: `Play as ${g.players[i].name} (${ROLES[g.players[i].role].name})`,
       style: { '--rc': ROLES[g.players[i].role].color }, onclick: () => switchSeat(i) },
     h('span', { class: 'pawnchip', style: { background: ROLES[g.players[i].role].color } }), g.players[i].name))) : null));
-  const sorted = me.hand.slice().sort((a, b) => {
-    const ka = Engine.isEvent(a) ? 9 : COLORS.indexOf(CITIES[a].color), kb = Engine.isEvent(b) ? 9 : COLORS.indexOf(CITIES[b].color);
-    return ka - kb || a.localeCompare(b);
-  });
+  const sortKey = (c) => Engine.isEvent(c) ? 9 : Engine.isBonus(c) ? 10 : COLORS.indexOf(CITIES[c].color);
+  const sorted = me.hand.slice().sort((a, b) => sortKey(a) - sortKey(b) || a.localeCompare(b));
   const cardEl = (card, stored) => {
-    const isEv = Engine.isEvent(card);
+    const isEv = Engine.isEvent(card), isBon = Engine.isBonus(card);
     let onclick = null;
     if (playing) {
       if (isEv) onclick = () => (over && !stored) ? discardOrPlay(card) : playEventDialog(card, stored);
       else if (over) onclick = () => send({ type: 'discard', card });
     }
     const tip = isEv ? { 'data-tip': EVENTS[Engine.eventKey(card)].text + ' Click to play.', 'data-tip-title': EVENTS[Engine.eventKey(card)].name }
-      : { title: over ? 'Click to discard' : `${CITIES[card].color} city card` };
+      : isBon ? { 'data-tip': 'Held at game end, worth prestige (team game).', title: over ? 'Click to discard' : 'Bonus card' }
+        : { title: over ? 'Click to discard' : `${CITIES[card].color} city card` };
     return h('div', { class: 'pcard' + (isEv ? ' event' : '') + (onclick ? ' clickable' : '') + (over && !stored ? ' discard' : '') + (card === me.location ? ' here' : ''),
-      style: { '--c': isEv ? '#9c6a00' : COLOR_HEX[CITIES[card].color] }, 'data-card': isEv ? EVENTS[Engine.eventKey(card)].name : card, ...tip, onclick },
-    h('div', { class: 'cn' }, isEv ? '★ ' + EVENTS[Engine.eventKey(card)].name : card),
-    h('div', { class: 'cc' }, isEv ? (stored ? 'stored event' : 'event · play anytime') : CITIES[card].color));
+      style: { '--c': isEv ? '#9c6a00' : isBon ? '#8a6d1f' : COLOR_HEX[CITIES[card].color] }, 'data-card': isEv ? EVENTS[Engine.eventKey(card)].name : card, ...tip, onclick },
+    h('div', { class: 'cn' }, isEv ? '★ ' + EVENTS[Engine.eventKey(card)].name : isBon ? '✦ Bonus' : card),
+    h('div', { class: 'cc' }, isEv ? (stored ? 'stored event' : 'event · play anytime') : isBon ? 'team bonus' : CITIES[card].color));
   };
   sorted.forEach(c => box.append(cardEl(c, false)));
   if (me.stored) box.append(cardEl(me.stored, true));
@@ -1140,7 +1167,7 @@ function renderBanner(g) {
   if (g.rvdColor && g.players.some(p => p.hand.includes('E:rapidVaccineDeployment') || p.stored === 'E:rapidVaccineDeployment')) {
     msg('💉 Rapid Vaccine Deployment can be played now (before the next action).', 'warn');
   }
-  if (g.current === ui.you && g.turn.phase === 'actions' && g.turn.actionsLeft <= 0) {
+  if (isActing(g) && g.turn.phase === 'actions' && g.turn.actionsLeft <= 0) {
     msg('All actions used — press End turn to draw cards, or Restart turn to redo your moves.', 'warn');
   }
   if (g.turn.phase === 'epidemic') msg('☣ Epidemic! Last chance to play Resilient Population before Intensify.', 'warn');
@@ -1154,20 +1181,24 @@ function renderTurnRow(g) {
   const ph = g.turn.phase;
   const total = g.turn.actionsLeft + g.turn.actionsTaken;
   const n = g.quietNight ? 0 : g.travelBan != null ? 1 : g.infectionRate;
-  bar.append(
-    h('span', { class: 'whose', ...roleTip(cur.role) }, h('span', { class: 'pawnchip', style: { background: ROLES[cur.role].color } }),
-      g.current === ui.you && !hotseat() ? 'Your turn' : `${cur.name}'s turn`, h('span', { class: 'muted small' }, ` · ${ROLES[cur.role].name}`)),
+  const whose = g.team
+    ? h('span', { class: 'whose' }, `Team ${g.curTeam + 1}'s turn`, h('span', { class: 'muted small' }, ` · ${g.teams[g.curTeam].players.map(i => g.players[i].name).join(' & ')}`))
+    : h('span', { class: 'whose', ...roleTip(cur.role) }, h('span', { class: 'pawnchip', style: { background: ROLES[cur.role].color } }),
+      g.current === ui.you && !hotseat() ? 'Your turn' : `${cur.name}'s turn`, h('span', { class: 'muted small' }, ` · ${ROLES[cur.role].name}`));
+  bar.append(whose,
     h('div', { class: 'stepper' },
-      h('span', { class: 'step' + (ph === 'actions' ? ' on' : '') }, 'Actions',
+      h('span', { class: 'step' + (ph === 'actions' ? ' on' : '') }, g.team ? 'Actions (team)' : 'Actions',
         h('span', { class: 'pips' }, Array.from({ length: total }, (_, i) => h('i', { class: i < g.turn.actionsTaken ? 'used' : '' })))),
       h('span', { class: 'arrow' }, '▶'),
-      h('span', { class: 'step' + (ph === 'draw' || ph === 'epidemic' ? ' on' : '') }, ph === 'epidemic' ? 'Epidemic!' : 'Draw 2'),
+      h('span', { class: 'step' + (ph === 'draw' || ph === 'epidemic' ? ' on' : '') }, ph === 'epidemic' ? 'Epidemic!' : 'Draw'),
       h('span', { class: 'arrow' }, '▶'),
       h('span', { class: 'step' + (ph === 'infect' ? ' on' : '') }, `Infect ${n}`),
       g.solo ? [h('span', { class: 'arrow' }, '▶'), h('span', { class: 'step' + (ph === 'cdc' ? ' on' : '') }, 'CDC')] : null));
   if (g.status !== 'playing') return;
-  if (g.current !== ui.you) {
-    if (isMine(g.current)) bar.append(h('button', { class: 'primary', onclick: () => switchSeat(g.current) }, `Switch to ${cur.name}`));
+  if (!isActing(g)) {
+    // Offer to switch to a controlled seat that can act now.
+    const target = g.team ? ui.mine.find(i => Engine.teamOf(g, i) === g.curTeam) : (isMine(g.current) ? g.current : null);
+    if (target != null) bar.append(h('button', { class: 'primary', onclick: () => switchSeat(target) }, `Switch to ${g.players[target].name}`));
     return;
   }
 
@@ -1436,7 +1467,7 @@ function renderLabBody() {
   const g = ui.game;
   if (!body || !g || !g.lab) return;
   const me = g.players[ui.you];
-  const myTurn = g.current === ui.you && g.turn.phase === 'actions' && g.status === 'playing';
+  const myTurn = isActing(g) && g.turn.phase === 'actions' && g.status === 'playing';
   const atStation = myTurn && g.stations.includes(me.location);
   const flags = g.turn.flags || {};
   const freeFor = (kind) => myTurn && (flags.labBonus

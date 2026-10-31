@@ -5,7 +5,7 @@
   else root.Room = factory(root.Engine, root.PData);
 }(typeof self !== 'undefined' ? self : this, function (Engine, D) {
   'use strict';
-  const MAX_SEATS = 5;
+  const MAX_SEATS = 6; // up to 6 for the team game (co-op/solo validated in createGame)
 
   const cleanName = (n) => String(n || '').trim().slice(0, 20) || 'Player';
   function newToken() {
@@ -81,7 +81,7 @@
       let seat = token && this.seat(token);
       if (!seat) {
         if (this.game) return { error: 'Game already started (only existing players can rejoin)' };
-        if (this.seats.length >= MAX_SEATS) return { error: 'Room is full (max 5 players)' };
+        if (this.seats.length >= MAX_SEATS) return { error: 'Room is full (max 6 players)' };
         seat = { token: newToken(), name: cleanName(name), role: null, connected: true };
         this.seats.push(seat);
         if (!this.hostToken) this.hostToken = seat.token;
@@ -102,7 +102,7 @@
       const owner = this.seat(token);
       if (!owner || owner.owner) return { error: 'You are not in this room' };
       if (this.game) return { error: 'Game already started' };
-      if (this.seats.length >= MAX_SEATS) return { error: 'Room is full (max 5 players)' };
+      if (this.seats.length >= MAX_SEATS) return { error: 'Room is full (max 6 players)' };
       this.seats.push({ token: newToken(), name: cleanName(name), role: null, connected: owner.connected, owner: token });
     }
 

@@ -387,3 +387,10 @@ details.exclude summary { cursor: pointer; color: var(--muted); font-size: 13px;
 /* Solo: the CDC's card box */
 .player.cdc { border-style: dashed; opacity: .96; }
 .player.cdc .pawnchip { border-radius: 3px; }
+
+/* Team game */
+.team-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 2px; padding: 4px 8px;
+  border-left: 3px solid var(--muted); font-size: 13px; }
+.team-head.current { border-left-color: var(--gold); background: rgba(230,185,74,.08); }
+.team-head .prestige { margin-left: auto; font-weight: 700; color: var(--gold); }
+.seat .tag { margin-left: 4px; }
