@@ -359,3 +359,27 @@ details.exclude summary { cursor: pointer; color: var(--muted); font-size: 13px;
 #map .edge.cut { stroke: #ff6e64; stroke-opacity: .35; stroke-dasharray: 3 6; }
 #map .edge.added { stroke: var(--gold); stroke-width: 2.5; stroke-dasharray: 8 5; opacity: .9; }
 #map .cutmark { stroke: #ff6e64; stroke-width: 3; stroke-linecap: round; fill: none; pointer-events: none; }
+
+/* Lab challenge board (modal) */
+.lab-lines { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 560px) { .lab-lines { grid-template-columns: 1fr; } }
+.lab-line { border: 1px solid rgba(255,255,255,.14); border-radius: 10px; padding: 8px 10px; background: rgba(255,255,255,.03); }
+.lab-line-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.lab-line-head .tag { color: #111; font-weight: 700; }
+.seqcard { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 0; }
+.seqvials { display: inline-flex; gap: 3px; }
+.vial-dot { width: 14px; height: 18px; border-radius: 7px 7px 4px 4px; display: inline-block; border: 1px solid rgba(0,0,0,.5); }
+.seqspots { display: inline-flex; gap: 4px; }
+.seqspots .spot { width: 20px; height: 20px; border-radius: 4px; border: 2px solid; box-sizing: border-box; }
+.seqspots .spot.filled { box-shadow: 0 0 0 2px rgba(255,255,255,.5) inset; }
+.lab-status { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 6px 0; }
+.lab-status .ok { color: #58c972; }
+.lab-dishes { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.lab-dish { border: 1px solid rgba(255,255,255,.12); border-radius: 8px; padding: 6px 8px; background: rgba(255,255,255,.03); }
+.lab-dish-name { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.lab-dish-cubes { display: flex; gap: 4px; flex-wrap: wrap; min-height: 22px; align-items: center; margin-bottom: 4px; }
+.labcube { width: 20px; height: 20px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 11px; font-weight: 700; border: 1px solid rgba(0,0,0,.6); }
+.lab-dish .row button, .lab-line .row button { font-size: 12px; padding: 3px 7px; }
+.lab-resolve { border: 1px solid var(--gold); border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; background: rgba(230,185,74,.08); }
+.check.challenge.sub + p { margin-top: 2px; }

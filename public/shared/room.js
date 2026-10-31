@@ -22,7 +22,7 @@
       this.code = code;
       this.seats = [];
       this.hostToken = null;
-      this.config = { epidemics: 5, eventsPerPlayer: 2, challenges: { virulent: false, mutation: false, worldwidePanic: false }, excludedRoles: [], customEvents: true };
+      this.config = { epidemics: 5, eventsPerPlayer: 2, challenges: { lab: false, virulent: false, mutation: false, worldwidePanic: false }, excludedRoles: [], customEvents: true };
       this.game = null;
       this.chat = [];
       if (saved) Object.assign(this, saved, { code });
@@ -125,7 +125,7 @@
       if ([4, 5, 6, 7].includes(ep)) this.config.epidemics = ep;
       if ([0, 1, 2, 3].includes(ev)) this.config.eventsPerPlayer = ev;
       if (cfg.challenges && typeof cfg.challenges === 'object') {
-        ['virulent', 'mutation', 'worldwidePanic'].forEach(k => {
+        ['lab', 'virulent', 'mutation', 'worldwidePanic'].forEach(k => {
           if (typeof cfg.challenges[k] === 'boolean') this.config.challenges[k] = cfg.challenges[k];
         });
         // Worldwide Panic is a Mutation variant; it only applies when Mutation is on.
@@ -138,6 +138,8 @@
     on_start(token) {
       if (token !== this.hostToken) return { error: 'Only the host can start' };
       if (this.game) return { error: 'Already started' };
+      // The Field Operative is not used in the Lab challenge; drop it to a random role.
+      if (this.config.challenges.lab) this.seats.forEach(s => { if (s.role === 'fieldOperative') s.role = null; });
       this.game = Engine.createGame({
         players: this.seats.map(s => ({ name: s.name, role: s.role })),
         epidemics: this.config.epidemics,

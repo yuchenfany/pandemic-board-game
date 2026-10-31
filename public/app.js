@@ -83,7 +83,7 @@ function openModal(title, body, buttons = []) {
   buttons.forEach(btn => bb.append(btn));
   $('#modal').classList.remove('hidden');
 }
-function closeModal() { $('#modal').classList.add('hidden'); ui.forecastFor = null; }
+function closeModal() { $('#modal').classList.add('hidden'); ui.forecastFor = null; ui.labOpen = false; }
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal' && !ui.forecastFor) closeModal(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !ui.forecastFor) closeModal(); });
 const cancelBtn = () => h('button', { onclick: closeModal }, 'Cancel');
@@ -344,7 +344,8 @@ function renderLobby() {
     h('input', { type: 'checkbox', checked: !!chal.worldwidePanic, disabled: !isHost, onchange: (e) => req('config', { challenges: { worldwidePanic: e.target.checked } }) }),
     'Worldwide Panic ', h('span', { class: 'tag' }, 'harder')) : null;
   const challenges = h('div', null,
-    chalBox('virulent'), chalBox('mutation'), wwpBox,
+    chalBox('lab'), chalBox('virulent'), chalBox('mutation'), wwpBox,
+    chal.lab ? h('p', { class: 'fine' }, 'Lab: the Field Operative is not used; cures must be built in the lab (see Help).') : null,
     h('label', { class: 'check challenge off', 'data-tip': "Not available online: the Bio-Terrorist's moves must stay secret from everyone, but the host's browser holds the whole game." },
       h('input', { type: 'checkbox', disabled: true }), 'Bio-Terrorist ', h('span', { class: 'tag' }, 'not available')),
     (chal.virulent || chal.mutation) ? h('p', { class: 'fine' }, 'Tip: the rulebook suggests 1 fewer epidemic than usual when adding a challenge.') : null);
@@ -366,10 +367,11 @@ function renderLobby() {
       h('div', { class: 'rn' }, '🎲 Random'), h('div', { class: 'rt' }, 'Get a random unused role when the game starts.')),
     ...Object.entries(ROLES).map(([key, ro]) => {
       const owner = ownerOf(key);
-      const mine = owner === pickFor, taken = owner >= 0 && !mine;
+      const labBanned = key === 'fieldOperative' && (cfg.challenges || {}).lab;
+      const mine = owner === pickFor, taken = (owner >= 0 && !mine) || labBanned;
       return h('div', { class: 'role-card' + (mine ? ' mine' : '') + (taken ? ' taken' : ''), style: { '--rc': ro.color },
         onclick: () => !taken && req('pickRole', { role: mine ? null : key, seat: pickFor }) },
-      owner >= 0 ? h('span', { class: 'who' }, r.seats[owner].name) : null,
+      labBanned ? h('span', { class: 'who' }, 'not in Lab') : owner >= 0 ? h('span', { class: 'who' }, r.seats[owner].name) : null,
       h('div', { class: 'rn' }, ro.name, ro.set === 'brink' ? h('span', { class: 'tag' }, 'Brink') : ro.set === 'lab' ? h('span', { class: 'tag' }, 'Lab') : null,
         excluded.includes(key) ? h('span', { class: 'tag', title: 'Never handed out at random' }, 'not random') : null),
       h('div', { class: 'rt' }, ro.text));
@@ -908,6 +910,8 @@ function renderGame() {
   renderChat();
   effects.run();
   maybeOpenForecast(g);
+  maybeOpenLabSequence(g);
+  if (ui.labOpen) renderLabBody();
 }
 
 function renderTopbar(g) {
@@ -946,6 +950,7 @@ function renderTopbar(g) {
       h('span', { 'data-conn': '' }),
       h('button', { onclick: () => showPile('Player discard pile', g.playerDiscard) }, `Discards (${g.playerDiscard.length})`),
       h('button', { onclick: () => showPile('Infection discard pile', g.infectionDiscard) }, `Infected (${g.infectionDiscard.length})`),
+      g.challenges && g.challenges.lab ? h('button', { onclick: openLab }, '🧪 Lab') : null,
       h('button', { onclick: showHelp }, 'Help'),
       h('button', { onclick: showMenu }, '⋯')),
   ].filter(Boolean));
@@ -981,6 +986,15 @@ function showHelp() {
     Object.values(ROLES).map(r => h('div', null, h('b', { style: { color: r.color } }, r.name), ' — ', r.text)),
     h('h4', null, 'Events'),
     Object.values(EVENTS).map(e => h('div', null, h('b', null, e.name), e.set === 'custom' ? ' (custom)' : '', ' — ', e.text)),
+    h('h4', null, 'Challenge: Lab'),
+    h('div', null, 'Cures must be built in the lab (open with the 🧪 Lab button) before they can be discovered. All lab actions are taken at a research station; each costs an action unless a role or the build bonus makes it free.'),
+    h('ul', null,
+      h('li', null, h('b', null, 'Treat Disease'), ' may keep 1 removed cube as a sample (in a sample dish).'),
+      h('li', null, h('b', null, 'Characterize'), ' — play a City card whose color is a vial symbol on a research line’s Sequence card; this sets the line’s cure color.'),
+      h('li', null, h('b', null, 'Process a Sample'), ' — move all cubes from a dish: a sample dish feeds the centrifuge (keep 1 color) or separator (1 of each color); the centrifuge/separator feed the growth dish (cubes double) or a Sequence card; gray spots take cure-color cubes, and leftover cubes return to the supply.'),
+      h('li', null, h('b', null, 'Test a Cure'), ' — once a line has a cube, play a cure-color City card and remove 1 cube of that color from a city.'),
+      h('li', null, h('b', null, 'Sequence a Disease'), ' — draw a Sequence card, then place it (needs a 2nd station), swap it in, or discard it.'),
+      h('li', null, h('b', null, 'Discover a Cure'), ' — when a line is characterized, fully filled and tested, cure it with 3 cards (Scientist 2) of its color.')),
     h('h4', null, 'Challenge: Virulent Strain'),
     h('div', null, 'At the first epidemic, the disease with the most cubes becomes the Virulent Strain. Each epidemic card also has an effect on it:'),
     Object.values(PData.VIRULENT).map(v => h('div', null, h('b', null, v.name), v.continuing ? ' (continuing)' : ' (immediate)', ' — ', v.text)),
@@ -1159,7 +1173,7 @@ function renderTurnRow(g) {
     } else send({ type: 'build' });
   }, { disabled: !canBuild, title: me.role === 'pilot' ? 'The Pilot cannot build' : g.stations.includes(here) ? 'Already a station here' : me.role === 'opsExpert' ? 'No card needed' : `Discard ${here}` }));
 
-  gcolors(g).filter(c => g.cubes[here][c] > 0).forEach(c => add(btn('💉', `Treat ${c}`, () => send({ type: 'treat', color: c }),
+  gcolors(g).filter(c => g.cubes[here][c] > 0).forEach(c => add(btn('💉', `Treat ${c}`, () => treatDisease(g, c),
     { class: 'colorbtn', style: { '--c': COLOR_HEX[c] } })));
 
   const shares = Engine.getShareOptions(g, ui.you);
@@ -1221,6 +1235,9 @@ function renderTurnRow(g) {
     const recips = g.players.map((q, i) => i).filter(i => i !== ui.you && CITIES[g.players[i].location].color === color);
     add(btn('🎁', 'Give (Liaison)', () => localLiaisonDialog(g, cards, recips),
       { disabled: g.turn.flags.localLiaison || !cards.length || !recips.length, title: `Give a ${color} card to a player in a ${color} city` }));
+  }
+  if (g.challenges.lab) {
+    add(btn('🧪', 'Lab board', openLab, { act: false, class: g.stations.includes(here) ? 'primary' : '', title: 'Characterize, process samples, test and sequence at a research station' }));
   }
 
   add(h('span', { class: 'spacer' }),
@@ -1337,6 +1354,191 @@ function pilotMove(g, pawn, city) {
     { label: '✈️ Fly alone', onClick: () => send({ type: 'move', pawn, to: city, method: 'pilot' }) },
     ...others.map(i => ({ label: `✈️ Take ${g.players[i].name} along`, onClick: () => send({ type: 'move', pawn, to: city, method: 'pilot', passenger: i }) })),
   ]);
+}
+
+// Treat Disease, offering (in the Lab challenge) to keep a cube as a sample.
+function treatDisease(g, color) {
+  if (!g.challenges.lab) return send({ type: 'treat', color });
+  openChoice(`Treat ${color}`, [
+    { label: `💉 Treat (return the cube to the supply)`, onClick: () => send({ type: 'treat', color }) },
+    { label: `🧫 Treat and keep a cube in sample dish 1`, onClick: () => send({ type: 'treat', color, sample: 'sampleA' }) },
+    { label: `🧫 Treat and keep a cube in sample dish 2`, onClick: () => send({ type: 'treat', color, sample: 'sampleB' }) },
+  ]);
+}
+
+// ------------------------------------------------------------ lab board
+
+const DISH_LABEL = { sampleA: 'Sample 1', sampleB: 'Sample 2', centrifuge: 'Centrifuge', separator: 'Separator', growth: 'Growth' };
+
+function openLab() {
+  const g = ui.game;
+  if (!g || !g.lab) return;
+  ui.labOpen = true;
+  openModal('🧪 Lab board', h('div', { id: 'labBody' }), [h('button', { onclick: closeModal }, 'Close')]);
+  renderLabBody();
+}
+
+function maybeOpenLabSequence(g) {
+  if (g.interrupt && g.interrupt.type === 'labSequence' && isMine(g.interrupt.player) && !ui.labOpen) openLab();
+}
+
+function cubeDot(col, n) {
+  return h('span', { class: 'labcube', style: { background: COLOR_HEX[col] }, title: `${n} ${col}` }, n > 1 ? n : '');
+}
+
+function dishCubes(g, dish) {
+  const kids = gcolors(g).filter(c => dish[c] > 0).map(c => cubeDot(c, dish[c]));
+  return kids.length ? kids : [h('span', { class: 'muted small' }, 'empty')];
+}
+
+function seqSpots(g, line) {
+  const seq = PData.SEQ_BY_ID[line.seqId];
+  return h('span', { class: 'seqspots' }, seq.spots.map((spot, i) => {
+    const filled = line.filled[i];
+    const need = spot === 'cure' ? (line.color || null) : spot;
+    const bg = filled ? COLOR_HEX[filled] : spot === 'cure' ? '#6b7280' : COLOR_HEX[spot];
+    return h('span', { class: 'spot' + (filled ? ' filled' : ''), style: { background: bg, borderColor: need ? COLOR_HEX[need] : '#9aa0a8' },
+      title: `${spot === 'cure' ? 'gray (cure color)' : spot} spot${filled ? ` — ${filled} cube` : ' — empty'}` });
+  }));
+}
+
+function renderLabBody() {
+  const body = document.getElementById('labBody');
+  const g = ui.game;
+  if (!body || !g || !g.lab) return;
+  const me = g.players[ui.you];
+  const myTurn = g.current === ui.you && g.turn.phase === 'actions' && g.status === 'playing';
+  const atStation = myTurn && g.stations.includes(me.location);
+  const flags = g.turn.flags || {};
+  const freeFor = (kind) => myTurn && (flags.labBonus
+    || (kind === 'process' && me.role === 'epidemiologist' && !flags.epiProcess)
+    || (kind === 'sequence' && me.role === 'researcher' && !flags.resSequence)
+    || ((kind === 'characterize' || kind === 'test') && me.role === 'localLiaison' && !flags.liaisonLab));
+  const can = (kind) => atStation && (g.turn.actionsLeft > 0 || freeFor(kind));
+  body.innerHTML = '';
+
+  // Sequence-card draw to resolve (place / swap / discard).
+  if (g.interrupt && g.interrupt.type === 'labSequence') {
+    const mine = isMine(g.interrupt.player);
+    const drawn = PData.SEQ_BY_ID[g.interrupt.card];
+    const box = h('div', { class: 'lab-resolve' },
+      h('b', null, 'Drew a Sequence card: '),
+      h('span', { class: 'seqvials' }, drawn.vials.map(c => h('span', { class: 'vial-dot', style: { background: COLOR_HEX[c] }, title: c }))),
+      seqSpotsPreview(drawn));
+    if (mine) {
+      const resolve = (mode, line) => send({ type: 'labSequenceResolve', mode, line }, g.interrupt.player);
+      const btns = [h('button', { onclick: () => resolve('discard') }, 'Discard it')];
+      g.lab.lines.forEach((ln, li) => {
+        if (!ln.seqId) { if (g.stations.length >= 2) btns.push(h('button', { class: 'primary', onclick: () => resolve('place', li) }, `Place on line ${li + 1}`)); }
+        else btns.push(h('button', { onclick: () => resolve('swap', li) }, `Swap into line ${li + 1}`));
+      });
+      box.append(h('div', { class: 'row', style: { marginTop: '8px', flexWrap: 'wrap' } }, btns));
+    } else box.append(h('div', { class: 'muted' }, `${g.players[g.interrupt.player].name} is choosing where to put it…`));
+    body.append(box);
+  }
+
+  // Research lines.
+  const lines = h('div', { class: 'lab-lines' }, g.lab.lines.map((line, li) => {
+    const kids = [h('div', { class: 'lab-line-head' }, h('b', null, `Research line ${li + 1}`),
+      line.color ? h('span', { class: 'tag', style: { background: COLOR_HEX[line.color] } }, line.color) : h('span', { class: 'muted small' }, 'not characterized'))];
+    if (!line.seqId) {
+      kids.push(h('div', { class: 'muted small' }, 'Empty — Sequence a disease (needs a 2nd research station) to open it.'));
+    } else {
+      const seq = PData.SEQ_BY_ID[line.seqId];
+      kids.push(h('div', { class: 'seqcard' },
+        h('span', { class: 'seqvials' }, seq.vials.map(c => h('span', { class: 'vial-dot', style: { background: COLOR_HEX[c] }, title: `can be characterized as ${c}` }))),
+        seqSpots(g, line)));
+      const status = [];
+      if (Engine.labLineComplete(g, line)) status.push(h('span', { class: 'ok' }, '✓ complete — Discover a Cure on the map'));
+      else {
+        status.push(h('span', { class: line.color ? 'ok' : '' }, line.color ? '✓ characterized' : '• characterize'));
+        status.push(h('span', { class: line.filled.every(x => x != null) ? 'ok' : '' }, `• spots ${line.filled.filter(x => x != null).length}/${line.filled.length}`));
+        status.push(h('span', { class: line.tested ? 'ok' : '' }, line.tested ? '✓ tested' : '• test'));
+      }
+      kids.push(h('div', { class: 'lab-status' }, status));
+      // Per-line actions.
+      const acts = [];
+      if (!line.color) {
+        const chCards = me.hand.filter(c => Engine.isCity(c) && seq.vials.includes(CITIES[c].color) && g.cures[CITIES[c].color] === 'none');
+        acts.push(h('button', { disabled: !can('characterize') || !chCards.length, onclick: () => labCharacterizeDialog(g, li, chCards) }, 'Characterize'));
+      }
+      if (line.color && !line.tested && line.filled.some(x => x != null)) {
+        acts.push(h('button', { disabled: !can('test'), onclick: () => labTestDialog(g, li) }, 'Test cure'));
+      }
+      if (acts.length) kids.push(h('div', { class: 'row', style: { flexWrap: 'wrap' } }, acts));
+    }
+    return h('div', { class: 'lab-line' }, kids);
+  }));
+  body.append(lines);
+
+  // Dishes.
+  const dishes = h('div', { class: 'lab-dishes' }, ['sampleA', 'sampleB', 'centrifuge', 'separator', 'growth'].map(d => {
+    const dish = g.lab.dishes[d];
+    const has = gcolors(g).some(c => dish[c] > 0);
+    const acts = [];
+    if (has && can('process')) {
+      if (d === 'sampleA' || d === 'sampleB') {
+        acts.push(h('button', { onclick: () => labProcessToCentrifuge(g, d) }, '→ Centrifuge'));
+        acts.push(h('button', { onclick: () => send({ type: 'labProcess', from: d, to: 'separator' }) }, '→ Separator'));
+      } else if (d === 'centrifuge' || d === 'separator') {
+        acts.push(h('button', { onclick: () => send({ type: 'labProcess', from: d, to: 'growth' }) }, '→ Growth (×2)'));
+        acts.push(h('button', { onclick: () => labProcessToCard(g, d) }, '→ Sequence card'));
+      } else {
+        acts.push(h('button', { onclick: () => labProcessToCard(g, d) }, '→ Sequence card'));
+      }
+    }
+    return h('div', { class: 'lab-dish' }, h('div', { class: 'lab-dish-name' }, DISH_LABEL[d]),
+      h('div', { class: 'lab-dish-cubes' }, dishCubes(g, dish)),
+      acts.length ? h('div', { class: 'row', style: { flexWrap: 'wrap' } }, acts) : null);
+  }));
+  body.append(h('h4', null, 'Dishes'), dishes);
+
+  // Sequence deck.
+  body.append(h('div', { class: 'row', style: { marginTop: '10px', alignItems: 'center' } },
+    h('button', { disabled: !can('sequence'), onclick: () => send({ type: 'labSequence' }) }, 'Sequence a disease (draw)'),
+    h('span', { class: 'muted small' }, `Deck ${g.lab.deckCount} · discard ${g.lab.discard.length}`)));
+  if (!atStation && myTurn) body.append(h('p', { class: 'fine' }, 'Move to a research station to take lab actions.'));
+  if (!myTurn) body.append(h('p', { class: 'fine' }, 'Lab actions are available on your turn, at a research station.'));
+}
+
+function seqSpotsPreview(seq) {
+  return h('span', { class: 'seqspots' }, seq.spots.map(spot =>
+    h('span', { class: 'spot', style: { background: spot === 'cure' ? '#6b7280' : COLOR_HEX[spot] }, title: spot === 'cure' ? 'gray (cure color)' : spot })));
+}
+
+function labCharacterizeDialog(g, li, cards) {
+  openChoice('Characterize — play a City card', cards.map(c => ({
+    label: `${c} → characterize as ${CITIES[c].color}`, onClick: () => send({ type: 'labCharacterize', line: li, card: c }),
+  })));
+}
+
+function labTestDialog(g, li) {
+  const me = g.players[ui.you];
+  const color = g.lab.lines[li].color;
+  const cards = me.hand.filter(c => Engine.isCity(c) && CITIES[c].color === color);
+  const cities = CITY_NAMES.filter(x => g.cubes[x][color] > 0);
+  if (!cards.length) return toast(`You need a ${color} City card to test`, 'info');
+  if (!cities.length) return toast(`No ${color} cube on the board to remove`, 'info');
+  openForm('Test the cure', `Play a ${color} City card and remove 1 ${color} cube from a city.`,
+    [{ name: 'card', label: 'City card', type: 'select', options: cards.map(c => [c, c]) },
+      { name: 'city', label: 'Remove a cube from', type: 'select', options: cities.map(c => [c, `${c} (${g.cubes[c][color]})`]) }],
+    (v) => send({ type: 'labTest', line: li, card: v.card, city: v.city }));
+}
+
+function labProcessToCentrifuge(g, from) {
+  const dish = g.lab.dishes[from];
+  const colors = gcolors(g).filter(c => dish[c] > 0);
+  if (colors.length === 1) return send({ type: 'labProcess', from, to: 'centrifuge', color: colors[0] });
+  openChoice('Keep which color? (others return to supply)', colors.map(c => ({
+    label: `${ICON[c]} ${c} (${dish[c]})`, onClick: () => send({ type: 'labProcess', from, to: 'centrifuge', color: c }),
+  })));
+}
+
+function labProcessToCard(g, from) {
+  const open = g.lab.lines.map((l, i) => i).filter(i => g.lab.lines[i].color);
+  if (!open.length) return toast('No characterized research line to receive cubes', 'info');
+  if (open.length === 1) return send({ type: 'labProcess', from, to: 'card', line: open[0] });
+  openChoice('Onto which research line?', open.map(i => ({ label: `Line ${i + 1} (${g.lab.lines[i].color})`, onClick: () => send({ type: 'labProcess', from, to: 'card', line: i }) })));
 }
 
 // ------------------------------------------------------------ events

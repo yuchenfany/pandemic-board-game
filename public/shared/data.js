@@ -214,7 +214,30 @@
     intensifies: { name: 'The Mutation Intensifies!', text: 'Place 1 purple cube on each city with exactly 2 purple cubes.' },
   };
 
+  // Lab challenge Sequence cards. Each shows the vial symbols it can be characterized as
+  // (which cure colors are allowed) and a row of spots to fill with cubes: 'cure' is a gray
+  // spot (filled by the cure color), a color name is a spot filled by a cube of that color.
+  // Exact card art isn't reproducible from the rulebook, so this is a representative set.
+  const SEQUENCES = [
+    { id: 'S1', vials: ['blue', 'yellow'], spots: ['cure', 'cure', 'black'] },
+    { id: 'S2', vials: ['black', 'red'], spots: ['cure', 'cure', 'blue'] },
+    { id: 'S3', vials: ['blue', 'black'], spots: ['cure', 'cure', 'red'] },
+    { id: 'S4', vials: ['yellow', 'red'], spots: ['cure', 'cure', 'blue'] },
+    { id: 'S5', vials: ['blue', 'red'], spots: ['cure', 'cure', 'yellow'] },
+    { id: 'S6', vials: ['yellow', 'black'], spots: ['cure', 'cure', 'red'] },
+    { id: 'S7', vials: ['blue'], spots: ['cure', 'cure', 'cure'] },
+    { id: 'S8', vials: ['yellow'], spots: ['cure', 'cure', 'cure'] },
+    { id: 'S9', vials: ['black'], spots: ['cure', 'cure', 'cure'] },
+    { id: 'S10', vials: ['red'], spots: ['cure', 'cure', 'cure'] },
+    { id: 'S11', vials: ['blue', 'yellow', 'black', 'red'], spots: ['cure', 'cure', 'cure'] },
+    { id: 'S12', vials: ['blue', 'yellow'], spots: ['cure', 'red', 'yellow'] },
+    { id: 'S13', vials: ['black', 'red'], spots: ['cure', 'blue', 'black'] },
+    { id: 'S14', vials: ['blue', 'yellow', 'black', 'red'], spots: ['cure', 'cure', 'red'] },
+  ];
+  const SEQ_BY_ID = Object.fromEntries(SEQUENCES.map(c => [c.id, c]));
+
   const CHALLENGES = {
+    lab: { name: 'Lab', text: 'Cures must be built in the lab first: characterize a disease, process disease samples onto its Sequence card, test the cure, then Discover a Cure with 3 cards (not 5).' },
     virulent: { name: 'Virulent Strain', text: 'One disease becomes particularly nasty: special epidemic cards add lasting or immediate effects to it.' },
     mutation: { name: 'Mutation', text: 'A 5th purple disease (only 12 cubes) appears through Mutation cards. Cure it with 5 City cards of any color, at least one from a city with purple cubes.' },
     worldwidePanic: { name: 'Worldwide Panic', text: 'A harder Mutation scenario: 24 purple cubes, Mutation cards place 2 purple (not 1), extra purple seeded during setup, and the purple cure needs 2 cards from cities with purple cubes.' },
@@ -227,5 +250,5 @@
     { epidemics: 7, name: 'Legendary' },
   ];
 
-  return { COLORS, COLOR_HEX, CITIES, MAP_W, MAP_H, EDGES, ADJ, ROLES, EVENTS, VIRULENT, MUTATION_EVENTS, CHALLENGES, DIFFICULTIES };
+  return { COLORS, COLOR_HEX, CITIES, MAP_W, MAP_H, EDGES, ADJ, ROLES, EVENTS, VIRULENT, MUTATION_EVENTS, CHALLENGES, DIFFICULTIES, SEQUENCES, SEQ_BY_ID };
 }));

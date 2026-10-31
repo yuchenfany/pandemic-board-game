@@ -626,4 +626,75 @@ test('mutation Worldwide Panic: 24 purple, seeded cubes, 2-purple cards, cure ne
   assert.strictEqual(h.cures.purple, 'cured');
 });
 
+// ---------------------------------------------------------------- Lab challenge
+
+function labLine(seqId) {
+  return { seqId, color: null, charCard: null, testCard: null, tested: false, filled: D.SEQ_BY_ID[seqId].spots.map(() => null) };
+}
+
+test('lab: characterize, process samples, test, then discover a cure', () => {
+  let s = fresh(['scientist', 'medic'], [['Tokyo', 'Seoul', 'Beijing', 'Osaka', 'Taipei']], { lab: true });
+  s.lab.lines[0] = labLine('S10'); // red vial, 3 gray spots
+  s = E.apply(s, 0, { type: 'labCharacterize', line: 0, card: 'Tokyo' });
+  assert.strictEqual(s.lab.lines[0].color, 'red');
+  assert.strictEqual(s.turn.actionsLeft, 3, 'characterize costs an action');
+  s.lab.dishes.centrifuge.red = 3; s.supply.red -= 3;
+  s = E.apply(s, 0, { type: 'labProcess', from: 'centrifuge', to: 'card', line: 0 });
+  assert(s.lab.lines[0].filled.every(x => x === 'red'), '3 red cubes fill the 3 gray spots');
+  expectFail(() => E.apply(s, 0, { type: 'cure', color: 'red', cards: ['Beijing', 'Osaka'] }), /not complete/);
+  put(s, 'Osaka', 'red', 1);
+  s = E.apply(s, 0, { type: 'labTest', line: 0, card: 'Seoul', city: 'Osaka' });
+  assert(E.labLineComplete(s, s.lab.lines[0]));
+  s = E.apply(s, 0, { type: 'cure', color: 'red', cards: ['Beijing', 'Osaka'] }); // scientist: 2 in the lab
+  assert.notStrictEqual(s.cures.red, 'none');
+  assert(s.lab.lines[0].seqId && s.lab.lines[0].color === null, 'a fresh Sequence card opens the line');
+});
+
+test('lab: sample processing moves and doubles cubes', () => {
+  let s = fresh(['scientist', 'medic'], [], { lab: true });
+  s.lab.dishes.sampleA.red = 2; s.lab.dishes.sampleA.blue = 1; s.supply.red -= 2; s.supply.blue -= 1;
+  s = E.apply(s, 0, { type: 'labProcess', from: 'sampleA', to: 'centrifuge', color: 'red' });
+  assert.strictEqual(s.lab.dishes.centrifuge.red, 2, 'kept red');
+  assert.strictEqual(s.lab.dishes.sampleA.blue, 0, 'blue returned to supply');
+  s = E.apply(s, 0, { type: 'labProcess', from: 'centrifuge', to: 'growth' });
+  assert.strictEqual(s.lab.dishes.growth.red, 4, 'growth doubles cubes');
+  s.lab.dishes.sampleB.black = 3; s.lab.dishes.sampleB.yellow = 2; s.supply.black -= 3; s.supply.yellow -= 2;
+  s = E.apply(s, 0, { type: 'labProcess', from: 'sampleB', to: 'separator' });
+  assert.strictEqual(s.lab.dishes.separator.black, 1);
+  assert.strictEqual(s.lab.dishes.separator.yellow, 1, 'separator keeps 1 of each color');
+});
+
+test('lab: free lab actions (Researcher) and the build bonus', () => {
+  let s = fresh(['researcher', 'medic'], [], { lab: true });
+  const a0 = s.turn.actionsLeft;
+  s = E.apply(s, 0, { type: 'labSequence' });
+  assert.strictEqual(s.interrupt.type, 'labSequence');
+  s = E.apply(s, 0, { type: 'labSequenceResolve', mode: 'discard' });
+  assert.strictEqual(s.turn.actionsLeft, a0, 'Researcher: first Sequence is free');
+  s = E.apply(s, 0, { type: 'labSequence' });
+  s = E.apply(s, 0, { type: 'labSequenceResolve', mode: 'discard' });
+  assert.strictEqual(s.turn.actionsLeft, a0 - 1, 'second Sequence costs an action');
+
+  let s2 = fresh(['scientist', 'medic'], [['Chicago']], { lab: true });
+  s2.players[0].location = 'Chicago';
+  const a1 = s2.turn.actionsLeft;
+  s2 = E.apply(s2, 0, { type: 'build' });
+  assert(s2.turn.flags.labBonus, 'building grants a free lab action');
+  s2 = E.apply(s2, 0, { type: 'labSequence' });
+  s2 = E.apply(s2, 0, { type: 'labSequenceResolve', mode: 'discard' });
+  assert.strictEqual(s2.turn.actionsLeft, a1 - 1, 'only the build cost an action; the lab action was free');
+});
+
+test('lab: Treat Disease can keep a cube as a sample; Field Operative is excluded', () => {
+  let s = fresh(['scientist', 'medic'], [], { lab: true });
+  put(s, 'Austin', 'blue', 2);
+  s = E.apply(s, 0, { type: 'treat', color: 'blue', sample: 'sampleA' });
+  assert.strictEqual(s.lab.dishes.sampleA.blue, 1, 'kept 1 treated cube as a sample');
+  assert.strictEqual(s.cubes['Austin'].blue, 1);
+  for (let i = 0; i < 15; i++) {
+    const g = E.createGame({ players: [{ name: 'A' }, { name: 'B' }, { name: 'C' }], epidemics: 5, challenges: { lab: true } });
+    assert(!g.players.some(p => p.role === 'fieldOperative'), 'no Field Operative in the Lab challenge');
+  }
+});
+
 console.log(`${passed} rule tests passed`);

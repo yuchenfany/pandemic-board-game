@@ -45,6 +45,7 @@ To test multiplayer locally, add hotseat players in the lobby, or open two brows
 - 16 events: 5 base + 8 On the Brink + 3 In the Lab (Improved Sanitation, Infection Zone Ban, Sequencing Breakthrough). Event count is configurable (default 2 per player, as OtB suggests).
 - Difficulty from Introductory (4 epidemics) up to Legendary (7).
 - **Challenges** (toggle in the lobby, can be combined):
+  - **Lab**: cures must be built in the lab before they can be discovered. Open the 🧪 Lab board to Characterize a disease, Process disease samples through the dishes (centrifuge/separator/growth) onto its Sequence card, and Test the cure; then Discover a Cure needs only 3 cards (Scientist 2). Lab actions happen at a research station; building one (or Government Grant) grants a free lab action, and the Researcher/Epidemiologist/Local Liaison get a free lab action each turn. The Field Operative is not used.
   - **Virulent Strain**: 10 Virulent Strain epidemic cards — the 8 On the Brink ones (Chronic Effect, Complex Molecular Structure, Government Interference, Rate Effect, Slippery Slope, Hidden Pocket, Unacceptable Loss, Uncounted Populations) plus the 2 In the Lab add-ons (Highly Contagious, Resistant to Treatment).
   - **Mutation**: a purple 5th disease (12 cubes), 2 Mutation infection cards and 3 Mutation event cards. Toggle **Worldwide Panic** for the harder In the Lab scenario (24 purple cubes, Mutation cards place 2 purple, extra purple seeded at setup, and the purple cure needs 2 cards from cities with purple cubes).
 - **Custom events** (lobby toggle, on by default, adds 2 cards to the deck):
@@ -61,6 +62,7 @@ To test multiplayer locally, add hotseat players in the lobby, or open two brows
 - If one draw contains two Mutation events, they resolve in the order drawn (the rules let the player choose).
 - The starting player is random (the official rule is highest city population).
 - Card and challenge texts follow the 2nd-edition On the Brink rulebook (`public/shared/data.js`).
+- **Lab challenge Sequence cards** use a representative set of patterns (`SEQUENCES` in `data.js`): the exact 14 card faces aren't reproducible from the rulebook, but the mechanic (characterize → process samples → test → discover) is faithful. In a Lab + Mutation game, purple is cured the normal way rather than via a research line.
 
 ## Layout
 ```

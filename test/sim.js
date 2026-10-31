@@ -7,18 +7,31 @@ const pick = (a) => a[Math.floor(Math.random() * a.length)];
 const CITY_NAMES = Object.keys(D.CITIES);
 
 function checkInvariants(s) {
+  const lab = s.lab;
   s.colors.forEach(c => {
     const board = CITY_NAMES.reduce((t, city) => t + s.cubes[city][c], 0);
     const samples = s.players.reduce((t, p) => t + p.samples[c], 0);
-    assert.strictEqual(board + samples + s.supply[c] + s.boxed[c], s.cubeMax[c], `cube conservation ${c}`);
+    let inLab = 0;
+    if (lab) {
+      Object.values(lab.dishes).forEach(d => { inLab += d[c]; });
+      lab.lines.forEach(l => { inLab += l.filled.filter(x => x === c).length; });
+    }
+    assert.strictEqual(board + samples + inLab + s.supply[c] + s.boxed[c], s.cubeMax[c], `cube conservation ${c}`);
     CITY_NAMES.forEach(city => assert(s.cubes[city][c] >= 0 && s.cubes[city][c] <= 3, `cube range ${city}`));
   });
+  const labCityCards = lab ? lab.lines.flatMap(l => [l.charCard, l.testCard].filter(Boolean)) : [];
   const cards = [...s.playerDeck, ...s.playerDiscard, ...s.removed.filter(c => !CITY_NAMES.includes(c)),
     ...s.players.flatMap(p => p.hand), ...s.players.map(p => p.stored).filter(Boolean),
-    ...(s.activeEvents || []).map(e => e.card)];
+    ...(s.activeEvents || []).map(e => e.card), ...labCityCards];
   assert.strictEqual(new Set(cards).size, cards.length, 'duplicate player card');
+  if (lab) {
+    const seqs = [...lab.deck, ...lab.discard, ...lab.lines.map(l => l.seqId).filter(Boolean)];
+    if (s.interrupt && s.interrupt.type === 'labSequence') seqs.push(s.interrupt.card);
+    assert.strictEqual(seqs.length, 14, 'sequence card count');
+    assert.strictEqual(new Set(seqs).size, seqs.length, 'duplicate sequence card');
+  }
   const inf = [...s.infectionDeck, ...s.infectionDiscard, ...s.removed.filter(c => CITY_NAMES.includes(c)),
-    ...(s.interrupt ? s.interrupt.cards : [])];
+    ...(s.interrupt && s.interrupt.cards ? s.interrupt.cards : [])];
   const infTotal = s.challenges.mutation ? 50 : 48;
   assert.strictEqual(inf.length, infTotal, 'infection card count');
   assert.strictEqual(new Set(inf).size, infTotal, 'duplicate infection card');
@@ -53,6 +66,11 @@ function randomEventParams(s, key) {
 function candidates(s) {
   const out = [];
   if (s.interrupt) {
+    if (s.interrupt.type === 'labSequence') {
+      const r = [[s.interrupt.player, { type: 'labSequenceResolve', mode: 'discard' }]]; // always valid
+      [0, 1].forEach(line => ['place', 'swap'].forEach(mode => r.push([s.interrupt.player, { type: 'labSequenceResolve', mode, line }])));
+      return r.sort(() => Math.random() - 0.5);
+    }
     return [[s.interrupt.player, { type: 'forecastOrder', order: [...s.interrupt.cards].sort(() => Math.random() - 0.5) }]];
   }
   const over = s.players.map((p, i) => i).filter(i => s.players[i].hand.length > E.handLimit(s.players[i]));
@@ -99,6 +117,37 @@ function candidates(s) {
   out.push([cur, { type: 'contingencyTake', card: pick(s.playerDiscard.filter(E.isEvent)) }]);
   out.push([cur, { type: 'archivistRetrieve' }]);
   s.players.forEach((q, i) => q.hand.forEach(c => out.push([cur, { type: 'epidemiologistTake', from: i, card: c }])));
+  // Lab actions
+  if (s.lab) {
+    const D2 = require('../public/shared/data');
+    const SEQ = D2.SEQ_BY_ID;
+    // Treat a cube straight into a sample dish.
+    s.colors.forEach(color => { if (s.cubes[p.location][color] > 0) out.push([cur, { type: 'treat', color, sample: pick(['sampleA', 'sampleB']) }]); });
+    s.lab.lines.forEach((line, li) => {
+      if (line.seqId && !line.color) p.hand.filter(E.isCity).forEach(c => {
+        if (SEQ[line.seqId].vials.includes(D2.CITIES[c].color)) out.push([cur, { type: 'labCharacterize', line: li, card: c }]);
+      });
+      if (line.color && !line.tested && line.filled.some(x => x != null)) {
+        const card = p.hand.find(c => E.isCity(c) && D2.CITIES[c].color === line.color);
+        const city = CITY_NAMES.find(x => s.cubes[x][line.color] > 0);
+        if (card && city) out.push([cur, { type: 'labTest', line: li, card, city }]);
+      }
+    });
+    Object.entries(s.lab.dishes).forEach(([from, dish]) => {
+      if (!s.colors.some(c => dish[c] > 0)) return;
+      const colorHere = s.colors.find(c => dish[c] > 0);
+      if (from === 'sampleA' || from === 'sampleB') {
+        out.push([cur, { type: 'labProcess', from, to: 'centrifuge', color: colorHere }]);
+        out.push([cur, { type: 'labProcess', from, to: 'separator' }]);
+      } else if (from === 'centrifuge' || from === 'separator') {
+        out.push([cur, { type: 'labProcess', from, to: 'growth' }]);
+        out.push([cur, { type: 'labProcess', from, to: 'card', line: Math.floor(Math.random() * 2) }]);
+      } else {
+        out.push([cur, { type: 'labProcess', from, to: 'card', line: Math.floor(Math.random() * 2) }]);
+      }
+    });
+    if (Math.random() < 0.2) out.push([cur, { type: 'labSequence' }]);
+  }
   if (Math.random() < 0.02 || s.turn.actionsLeft === 0) out.push([cur, { type: 'endActions' }]);
   if (Math.random() < 0.01) out.push([cur, { type: 'restartTurn' }]);
   return out;
@@ -151,7 +200,7 @@ const N = Number(process.argv[2] || 300);
 const tally = {};
 let vsSeen = 0;
 for (let i = 0; i < N; i++) {
-  const challenges = { virulent: i % 3 !== 0, mutation: i % 2 === 0 };
+  const challenges = { virulent: i % 3 !== 0, mutation: i % 2 === 0, lab: i % 2 === 1 };
   const s = playOne(2 + (i % 4), 4 + (i % 4), challenges);
   if (s.challenges.virulent && s.vsPlayed.length) vsSeen += 1;
   const key = s.status === 'won' ? 'won' : s.result;

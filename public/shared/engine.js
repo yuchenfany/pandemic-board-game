@@ -5,7 +5,7 @@
   else root.Engine = factory(root.PData);
 }(typeof self !== 'undefined' ? self : this, function (D) {
   'use strict';
-  const { CITIES, ADJ, COLORS, ROLES, EVENTS, VIRULENT, MUTATION_EVENTS } = D;
+  const { CITIES, ADJ, COLORS, ROLES, EVENTS, VIRULENT, MUTATION_EVENTS, SEQUENCES, SEQ_BY_ID } = D;
   const CITY_NAMES = Object.keys(CITIES);
   const RATES = [2, 2, 2, 3, 3, 4, 4];
   const HAND_SIZE = { 2: 4, 3: 3, 4: 2, 5: 2 };
@@ -88,18 +88,21 @@
     if (epidemics < 4 || epidemics > 7) fail('Epidemics must be 4-7');
     const mutation = !!challenges.mutation, virulent = !!challenges.virulent;
     const worldwidePanic = mutation && !!challenges.worldwidePanic;
+    const lab = !!challenges.lab;
     const purpleCubes = worldwidePanic ? 24 : PURPLE_CUBES;
 
     const roleKeys = Object.keys(ROLES);
     const chosen = players.map(p => p.role).filter(Boolean);
     if (new Set(chosen).size !== chosen.length) fail('Two players picked the same role');
     chosen.forEach(r => { if (!ROLES[r]) fail(`Unknown role ${r}`); });
-    const freeRoles = shuffle(roleKeys.filter(r => !chosen.includes(r) && !excludedRoles.includes(r)));
+    // The Field Operative is not used in the Lab challenge (its samples clash with lab samples).
+    const labExcluded = lab ? ['fieldOperative'] : [];
+    const freeRoles = shuffle(roleKeys.filter(r => !chosen.includes(r) && !excludedRoles.includes(r) && !labExcluded.includes(r)));
     if (players.filter(p => !p.role).length > freeRoles.length) fail('Not enough roles left for the Random players (too many excluded)');
 
     const colors = mutation ? [...COLORS, 'purple'] : COLORS.slice();
     const s = {
-      challenges: { mutation, virulent, worldwidePanic },
+      challenges: { mutation, virulent, worldwidePanic, lab },
       colors,
       cubeMax: Object.fromEntries(colors.map(c => [c, c === 'purple' ? purpleCubes : CUBES_PER_COLOR])),
       players: [],
@@ -182,6 +185,18 @@
     }
     for (let i = piles.length - 1; i >= 0; i--) s.playerDeck.push(...piles[i]);
 
+    if (lab) {
+      const labDeck = shuffle(SEQUENCES.map(c => c.id));
+      const newLine = () => ({ seqId: null, color: null, charCard: null, testCard: null, tested: false, filled: [] });
+      s.lab = {
+        lines: [newLine(), newLine()],
+        dishes: Object.fromEntries(['sampleA', 'sampleB', 'centrifuge', 'separator', 'growth'].map(d => [d, zeroCubes(colors)])),
+        deck: labDeck,
+        discard: [],
+      };
+      placeSequence(s, 0, labDeck.pop()); // the first research line starts with a Sequence card
+      log(s, 'Challenge: Lab — cures must be built in the lab before they can be discovered.');
+    }
     if (virulent) log(s, 'Challenge: Virulent Strain.');
     if (mutation) log(s, 'Challenge: Mutation (purple disease, 12 cubes).');
     s.players.forEach(p => log(s, `${p.name} is the ${ROLES[p.role].name}.`));
@@ -460,6 +475,7 @@
   // Complex Molecular Structure adds 1 for an uncured Virulent Strain).
   function cardsNeededForCure(s, p, color, useSamples) {
     let n = p.role === 'scientist' ? 4 : 5;
+    if (s.challenges && s.challenges.lab) n = p.role === 'scientist' ? 2 : 3; // Lab: 3 (not 5), Scientist 2
     if (color && color === s.virulent && vsOn(s, 'complexMolecularStructure') && s.cures[color] === 'none') n++;
     n -= (s.activeEvents || []).filter(e => e.key === 'sequencingBreakthrough').length; // Sequencing Breakthrough
     if (useSamples) n -= 2;
@@ -560,6 +576,76 @@
     } else {
       log(s, 'Purple is eradicated — no effect.');
     }
+  }
+
+  // ---------------------------------------------------------------- Lab challenge
+
+  // Place a Sequence card id onto research line `li`, resetting its progress.
+  function placeSequence(s, li, seqId) {
+    const line = s.lab.lines[li];
+    line.seqId = seqId;
+    line.filled = seqId ? SEQ_BY_ID[seqId].spots.map(() => null) : [];
+    line.color = null; line.charCard = null; line.testCard = null; line.tested = false;
+  }
+  // The color a spot needs: a gray ('cure') spot needs the line's cure color.
+  function spotNeed(line, i) {
+    const spot = SEQ_BY_ID[line.seqId].spots[i];
+    return spot === 'cure' ? line.color : spot;
+  }
+  // A cube of `color` fills open spot i if it matches, or that spot's color is eradicated.
+  function spotAccepts(s, line, i, color) {
+    if (line.filled[i] != null) return false;
+    const need = spotNeed(line, i);
+    if (!need) return false;
+    return color === need || s.cures[need] === 'eradicated';
+  }
+  const lineFilled = (line) => line.seqId && line.filled.length > 0 && line.filled.every(x => x != null);
+  const lineComplete = (s, line) => !!line.color && line.tested && lineFilled(line);
+  function clearLineCubes(s, line) {
+    line.filled.forEach((c, i) => { if (c != null) { s.supply[c]++; line.filled[i] = null; } });
+  }
+  function emptyDishToSupply(s, dish) {
+    s.colors.forEach(c => { s.supply[c] += dish[c]; dish[c] = 0; });
+  }
+  const dishTotal = (s, dish) => s.colors.reduce((t, c) => t + dish[c], 0);
+  function requireLabStation(s, p) {
+    if (!s.lab) fail('There is no lab in this game');
+    if (!s.stations.includes(p.location)) fail('Lab actions must be done at a research station');
+  }
+  // Move cubes from a dish onto a characterized line's Sequence card; leftovers go to the supply.
+  function fillCardFromDish(s, line, dish) {
+    const spots = SEQ_BY_ID[line.seqId].spots;
+    s.colors.forEach(color => {
+      while (dish[color] > 0) {
+        const i = spots.findIndex((_, idx) => spotAccepts(s, line, idx, color));
+        if (i < 0) break;
+        line.filled[i] = color;
+        dish[color]--;
+      }
+    });
+    emptyDishToSupply(s, dish);
+  }
+  // Free lab actions: the build bonus, or a role's once-per-turn lab ability. Returns the
+  // free source to consume (or null, meaning it costs a normal action).
+  function labFreeSource(s, p, kind) {
+    if (s.turn.flags.labBonus) return 'labBonus';
+    if (kind === 'process' && p.role === 'epidemiologist' && !s.turn.flags.epiProcess) return 'epiProcess';
+    if (kind === 'sequence' && p.role === 'researcher' && !s.turn.flags.resSequence) return 'resSequence';
+    if ((kind === 'characterize' || kind === 'test') && p.role === 'localLiaison' && !s.turn.flags.liaisonLab) return 'liaisonLab';
+    return null;
+  }
+  function labBegin(s, pid, kind) {
+    const p = s.players[pid];
+    if (pid !== s.current || !s.turn || s.turn.phase !== 'actions') fail('Only during your actions phase');
+    requireLabStation(s, p);
+    const free = labFreeSource(s, p, kind);
+    if (!free && s.turn.actionsLeft <= 0) fail('No actions left this turn');
+    return { p, free };
+  }
+  function labEnd(s, free) {
+    if (free === 'labBonus') s.turn.flags.labBonus = false;
+    else if (free) s.turn.flags[free] = true;
+    else spendAction(s);
   }
 
   function continueDrawing(s) {
@@ -702,6 +788,10 @@
         }
         s.stations.push(city);
         log(s, `Research station built in ${city}.`);
+        if (s.challenges.lab && pid === s.current && s.turn.phase === 'actions') {
+          s.turn.flags.labBonus = true;
+          log(s, `${p.name} may do 1 free lab action.`);
+        }
         break;
       }
       case 'oneQuietNight':
@@ -838,12 +928,14 @@
     if (!p) fail('You are not a player in this game');
 
     if (s.interrupt) {
-      if (a.type !== 'forecastOrder' || pid !== s.interrupt.player) {
-        fail(`Waiting for ${s.players[s.interrupt.player].name} to finish Forecast`);
+      const expect = s.interrupt.type === 'labSequence' ? 'labSequenceResolve' : 'forecastOrder';
+      const what = s.interrupt.type === 'labSequence' ? 'Sequencing' : 'Forecast';
+      if (a.type !== expect || pid !== s.interrupt.player) {
+        fail(`Waiting for ${s.players[s.interrupt.player].name} to finish ${what}`);
       }
     }
     const over = overLimit(s);
-    if (over.length && !['discard', 'playEvent', 'forecastOrder'].includes(a.type)) {
+    if (over.length && !['discard', 'playEvent', 'forecastOrder', 'labSequenceResolve'].includes(a.type)) {
       fail(`Waiting for ${over.map(i => s.players[i].name).join(', ')} to discard down to the hand limit`);
     }
     if (a.type !== 'playEvent' && a.type !== 'discard') s.rvdColor = null;
@@ -893,6 +985,8 @@
         s.stations.push(here);
         log(s, `${p.name} built a research station in ${here}.`);
         spendAction(s);
+        // Lab: building earns 1 free bonus lab action.
+        if (s.challenges.lab) { s.turn.flags.labBonus = true; log(s, `${p.name} may do 1 free lab action.`); }
         break;
       }
       case 'treat': {
@@ -915,6 +1009,12 @@
         const k = removeCubes(s, target, color, want);
         if (color === s.virulent) markVsTreated(s, target);
         log(s, `${p.name} treated ${k} ${color} cube(s) in ${target}.`);
+        // Lab: 1 of the cubes just removed may be kept as a sample instead of returned to the supply.
+        if (s.challenges.lab && k > 0 && (a.sample === 'sampleA' || a.sample === 'sampleB') && s.supply[color] > 0) {
+          s.supply[color]--;
+          s.lab.dishes[a.sample][color]++;
+          log(s, `${p.name} kept 1 ${color} cube as a sample.`);
+        }
         checkEradication(s);
         spendAction(s);
         if (resistant) spendAction(s);
@@ -938,6 +1038,12 @@
         if (!s.colors.includes(color)) fail('Pick a color');
         if (!s.stations.includes(here)) fail('You must be at a research station');
         if (s.cures[color] !== 'none') fail('That disease is already cured');
+        // Lab: a standard disease can only be cured once its research line is complete.
+        let labLine = -1;
+        if (s.challenges.lab && color !== 'purple') {
+          labLine = s.lab.lines.findIndex(l => l.color === color && lineComplete(s, l));
+          if (labLine < 0) fail('The lab research line for this disease is not complete yet (characterize it, fill its Sequence card, and test the cure)');
+        }
         const useSamples = !!a.useSamples;
         if (useSamples && (p.role !== 'fieldOperative' || p.samples[color] < 3)) fail('You need 3 samples of that color');
         const need = cardsNeededForCure(s, p, color, useSamples);
@@ -972,6 +1078,17 @@
         s.cures[color] = 'cured';
         // Sequencing Breakthrough is spent once the next cure is discovered.
         expireEvents(s, (e) => e.key === 'sequencingBreakthrough');
+        // Lab: retire the completed research line's Sequence card and open a fresh one.
+        if (labLine >= 0) {
+          const line = s.lab.lines[labLine];
+          if (line.charCard) s.playerDiscard.push(line.charCard);
+          if (line.testCard) s.playerDiscard.push(line.testCard);
+          clearLineCubes(s, line);
+          s.lab.discard.push(line.seqId);
+          if (!s.lab.deck.length) { s.lab.deck = shuffle(s.lab.discard); s.lab.discard = []; }
+          placeSequence(s, labLine, s.lab.deck.length ? s.lab.deck.pop() : null);
+          log(s, `Research line ${labLine + 1} opened a new Sequence card.`);
+        }
         log(s, `${p.name} discovered a cure for ${color}!`);
         s.players.forEach((q, qi) => { if (q.role === 'medic') onEnter(s, qi); });
         checkEradication(s);
@@ -1078,6 +1195,152 @@
         spendAction(s);
         break;
       }
+      case 'labCharacterize': {
+        const { p: pl, free } = labBegin(s, pid, 'characterize');
+        const li = a.line, line = s.lab.lines[li];
+        if (!line || !line.seqId) fail('There is no Sequence card on that research line');
+        if (line.color) fail('That research line is already characterized');
+        const card = a.card;
+        if (!isCity(card) || !pl.hand.includes(card)) fail('Play a City card you hold');
+        const color = CITIES[card].color;
+        if (!SEQ_BY_ID[line.seqId].vials.includes(color)) fail("That card's color is not a vial symbol on this Sequence card");
+        if (s.cures[color] !== 'none') fail('That disease is already cured');
+        // If the other line is already this disease, close it (discard its cards and cubes).
+        const other = s.lab.lines[1 - li];
+        if (other.color === color) {
+          if (other.charCard) s.playerDiscard.push(other.charCard);
+          if (other.testCard) s.playerDiscard.push(other.testCard);
+          clearLineCubes(s, other);
+          if (other.seqId) s.lab.discard.push(other.seqId);
+          placeSequence(s, 1 - li, null);
+          log(s, `The other research line was also ${color}, so it was closed.`);
+        }
+        removeOne(pl.hand, card);
+        line.charCard = card;
+        line.color = color;
+        log(s, `${pl.name} characterized research line ${li + 1} as ${color}.`);
+        labEnd(s, free);
+        break;
+      }
+      case 'labProcess': {
+        const { free } = labBegin(s, pid, 'process');
+        const d = s.lab.dishes, from = a.from;
+        if (!d[from]) fail('Pick a dish to process');
+        if (dishTotal(s, d[from]) === 0) fail('That dish is empty');
+        if (from === 'sampleA' || from === 'sampleB') {
+          if (a.to === 'centrifuge') {
+            const color = a.color;
+            if (!s.colors.includes(color) || d[from][color] === 0) fail('Pick a color present in that sample dish');
+            s.colors.forEach(c => {
+              if (c === color) { d.centrifuge[c] += d[from][c]; } else { s.supply[c] += d[from][c]; }
+              d[from][c] = 0;
+            });
+            log(s, `Processed a sample: ${color} cubes to the centrifuge.`);
+          } else if (a.to === 'separator') {
+            s.colors.forEach(c => {
+              if (d[from][c] > 0) { d.separator[c] += 1; d[from][c] -= 1; }
+              s.supply[c] += d[from][c]; d[from][c] = 0;
+            });
+            log(s, 'Processed a sample: 1 cube of each color to the separator.');
+          } else fail('A sample dish feeds the centrifuge or the separator');
+        } else if (from === 'centrifuge' || from === 'separator') {
+          if (a.to === 'growth') {
+            s.colors.forEach(c => {
+              const n = d[from][c];
+              if (!n) return;
+              const k = Math.min(n, s.supply[c]); // doubled cubes come from the supply
+              s.supply[c] -= k;
+              d.growth[c] += n + k;
+              d[from][c] = 0;
+              if (k < n) lose(s, `Ran out of ${c} disease cubes.`);
+            });
+            if (s.status !== 'playing') { labEnd(s, free); break; }
+            log(s, `Processed to the growth dish (cubes doubled) from the ${from}.`);
+          } else if (a.to === 'card') {
+            const line = s.lab.lines[a.line];
+            if (!line || !line.color) fail('Pick a characterized research line');
+            fillCardFromDish(s, line, d[from]);
+            log(s, `Processed ${from} cubes onto research line ${a.line + 1}.`);
+          } else fail('The centrifuge/separator feeds the growth dish or a Sequence card');
+        } else if (from === 'growth') {
+          if (a.to !== 'card') fail('The growth dish feeds a Sequence card');
+          const line = s.lab.lines[a.line];
+          if (!line || !line.color) fail('Pick a characterized research line');
+          fillCardFromDish(s, line, d.growth);
+          log(s, `Processed growth cubes onto research line ${a.line + 1}.`);
+        } else fail('Unknown dish');
+        labEnd(s, free);
+        break;
+      }
+      case 'labTest': {
+        const { p: pl, free } = labBegin(s, pid, 'test');
+        const li = a.line, line = s.lab.lines[li];
+        if (!line || !line.color) fail('That research line is not characterized yet');
+        if (line.tested) fail('That cure is already tested');
+        if (!line.filled.some(x => x != null)) fail('A cure cannot be tested until at least 1 cube is on its Sequence card');
+        const card = a.card;
+        if (!isCity(card) || !pl.hand.includes(card) || CITIES[card].color !== line.color) fail(`Play a ${line.color} City card`);
+        const city = validCity(a.city);
+        if (s.cubes[city][line.color] < 1) fail(`Remove 1 ${line.color} cube to test: there is none in ${city}`);
+        removeOne(pl.hand, card);
+        line.testCard = card;
+        line.tested = true;
+        removeCubes(s, city, line.color, 1);
+        if (line.color === s.virulent) markVsTreated(s, city);
+        log(s, `${pl.name} tested the ${line.color} cure (removed 1 cube from ${city}).`);
+        checkEradication(s);
+        labEnd(s, free);
+        break;
+      }
+      case 'labSequence': {
+        const { p: pl, free } = labBegin(s, pid, 'sequence');
+        if (!s.lab.deck.length) { s.lab.deck = shuffle(s.lab.discard); s.lab.discard = []; }
+        if (!s.lab.deck.length) fail('No Sequence cards left to draw');
+        const drawn = s.lab.deck.pop();
+        s.interrupt = { type: 'labSequence', player: pid, card: drawn, free };
+        s.turn.flags.revealed = true; // a hidden Sequence card was revealed
+        log(s, `${pl.name} drew a Sequence card.`);
+        break;
+      }
+      case 'labSequenceResolve': {
+        if (!s.interrupt || s.interrupt.type !== 'labSequence' || pid !== s.interrupt.player) fail('No drawn Sequence card to resolve');
+        const drawn = s.interrupt.card, free = s.interrupt.free;
+        if (a.mode === 'discard') {
+          s.lab.discard.push(drawn);
+          log(s, 'Discarded the drawn Sequence card.');
+        } else {
+          const li = a.line, line = s.lab.lines[li];
+          if (li !== 0 && li !== 1) fail('Pick a research line');
+          if (a.mode === 'place') {
+            if (line.seqId) fail('That research line already has a Sequence card');
+            if (s.stations.length < 2) fail('You need a 2nd research station to open the other research line');
+            placeSequence(s, li, drawn);
+            log(s, `Placed the Sequence card on research line ${li + 1}.`);
+          } else if (a.mode === 'swap') {
+            if (!line.seqId) fail('That research line is empty — place the card instead');
+            const keepColor = line.color && SEQ_BY_ID[drawn].vials.includes(line.color);
+            const carry = line.filled.filter(x => x != null);
+            const prev = { color: line.color, charCard: line.charCard, testCard: line.testCard, tested: line.tested };
+            if (!keepColor) {
+              if (line.charCard) s.playerDiscard.push(line.charCard);
+              if (line.testCard) s.playerDiscard.push(line.testCard);
+              carry.forEach(c => s.supply[c]++); // old cubes return to the supply
+            }
+            s.lab.discard.push(line.seqId);
+            placeSequence(s, li, drawn);
+            if (keepColor) {
+              Object.assign(line, prev);
+              const dish = zeroCubes(s.colors);
+              carry.forEach(c => dish[c]++);
+              fillCardFromDish(s, line, dish); // carry cubes onto the new card; excess to supply
+            }
+            log(s, `Swapped in a new Sequence card on research line ${li + 1}.`);
+          } else fail('Pick place, swap or discard');
+        }
+        s.interrupt = null;
+        labEnd(s, free);
+        break;
+      }
       case 'pass':
         requireActionTurn(s, pid);
         log(s, `${p.name} passed an action.`);
@@ -1149,6 +1412,7 @@
     delete v.playerDeck;
     delete v.infectionDeck;
     delete v.turnStart;
+    if (v.lab) { v.lab.deckCount = s.lab.deck.length; delete v.lab.deck; }
     v.canRestart = canRestart(s) && JSON.stringify({ ...s, turnStart: null, log: null, logCount: null }) !==
       JSON.stringify({ ...s.turnStart, turnStart: null, log: null, logCount: null });
     v.infectionRate = RATES[s.rateIdx];
@@ -1164,5 +1428,6 @@
     GameError, createGame, apply, view, adj, getMoveOptions, getShareOptions, cardsNeededForCure, cureCards, leaveBlocked,
     isCity, isEvent, isEpidemic, isMutationEvent, isMutationCard, vsKeyOf, eventKey, cardName, handLimit,
     RATES, MAX_STATIONS, MAX_OUTBREAKS, infectAdj,
+    labLineComplete: lineComplete, labSpotNeed: spotNeed, labSpotAccepts: spotAccepts,
   };
 }));
