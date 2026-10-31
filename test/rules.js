@@ -846,4 +846,45 @@ test('team: game end totals prestige and names the winner', () => {
   assert(/Team 1 wins/.test(s.result));
 });
 
+for (const boardKey of ['universities', 'eastasia']) test(`${boardKey} board is the cities board with places in place of cities`, () => {
+  const W = D.BOARDS.cities, U = D.BOARDS[boardKey];
+  const slot = U.slots; // place -> city
+  assert.strictEqual(Object.keys(U.cities).length, 48);
+  assert.deepStrictEqual(Object.values(slot).sort(), Object.keys(W.cities).sort(), 'one school per city');
+  // Colors may be renamed, but consistently: each slot color maps to exactly one school color.
+  const rename = {};
+  Object.keys(U.cities).forEach(u => {
+    const from = W.cities[slot[u]].color;
+    rename[from] = rename[from] || U.cities[u].color;
+    assert.strictEqual(U.cities[u].color, rename[from], `${u} color`);
+  });
+  assert.strictEqual(new Set(Object.values(rename)).size, 4, 'color renaming is one-to-one');
+  const key = (a, b) => [a, b].sort().join('|');
+  const mapped = new Set(U.edges.map(([a, b]) => key(slot[a], slot[b])));
+  assert.strictEqual(U.edges.length, W.edges.length);
+  W.edges.forEach(([a, b]) => assert(mapped.has(key(a, b)), `${a}-${b} kept`));
+  assert.strictEqual(slot[U.start], W.start, 'start place sits in the start city slot');
+  Object.entries(U.cities).forEach(([name, c]) => {
+    assert(c.x >= 0 && c.x <= D.MAP_W && c.y >= 0 && c.y <= D.MAP_H, `${name} on the canvas`);
+    if (boardKey === 'eastasia') assert(c.region && /[\u4e00-\u9fff]/.test(c.zh), `${name} has a region and Chinese name`);
+  });
+});
+
+test('a universities game starts at its own start and switches the active board', () => {
+  const g = E.createGame({ players: [{ name: 'A' }, { name: 'B' }], epidemics: 4, board: 'universities' });
+  assert.strictEqual(g.board, 'universities');
+  assert.deepStrictEqual(g.stations, ['Texas A&M']);
+  assert(g.players.every(p => p.location === 'Texas A&M'));
+  assert(D.CITIES['MIT'] && !D.CITIES['Paris'] && D.CITY_NAMES.length === 48);
+  const slot = D.BOARDS.universities.slots, W = D.BOARDS.cities;
+  const expected = W.edges.filter(e => e.includes(W.start)).map(e => e.find(c => c !== W.start));
+  assert.deepStrictEqual(E.adj(g, 'Texas A&M').map(u => slot[u]).sort(), expected.sort(), 'start keeps the start city\'s connections');
+  // Applying an action to a cities game switches back.
+  const c = E.createGame({ players: [{ name: 'A' }, { name: 'B' }], epidemics: 4 });
+  D.useBoard('universities');
+  E.apply(c, c.current, { type: 'pass' });
+  assert(D.CITIES['Paris'] && D.board === 'cities');
+  assert.throws(() => E.createGame({ players: [{ name: 'A' }, { name: 'B' }], board: 'moon' }), E.GameError);
+});
+
 console.log(`${passed} rule tests passed`);

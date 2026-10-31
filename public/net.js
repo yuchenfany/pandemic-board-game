@@ -1,4 +1,4 @@
-/* global Peer, Room */
+/* global Peer, Room, Bedtime */
 // Peer-to-peer transport. The room creator's browser is the host: it owns the Room and
 // relays state to guests over WebRTC data channels (PeerJS handles signalling).
 'use strict';
@@ -102,6 +102,7 @@ class HostNet extends BaseNet {
   }
 
   emit(ev, data, cb) {
+    if (!Bedtime.canPlay()) { if (cb) cb({ error: 'Play is locked for bedtime.' }); return; }
     const res = this.room.handle(this.myToken, ev, data);
     if (ev === 'join' && res.token) this.myToken = res.token;
     if (cb) cb(res);
@@ -215,6 +216,11 @@ class GuestNet extends BaseNet {
   }
 
   send(ev, data, cb) {
+    // Reclaiming an existing seat keeps reconnects working; new joins and moves are locked.
+    if (!(ev === 'join' && data && data.token) && !Bedtime.canPlay()) {
+      if (cb) cb({ error: 'Play is locked for bedtime.' });
+      return;
+    }
     if (!this.conn || !this.conn.open) { if (cb) cb({ error: 'Not connected to the host yet' }); return; }
     const id = this.nextId++;
     if (cb) this.pending.set(id, cb);

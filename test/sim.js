@@ -4,7 +4,7 @@ const E = require('../public/shared/engine');
 const D = require('../public/shared/data');
 
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
-const CITY_NAMES = Object.keys(D.CITIES);
+const CITY_NAMES = D.CITY_NAMES; // live: follows the board of the game being played
 
 function checkInvariants(s) {
   const lab = s.lab;
@@ -153,8 +153,9 @@ function candidates(s) {
   return out;
 }
 
-function playOne(nPlayers, epidemics, challenges, mode) {
+function playOne(nPlayers, epidemics, challenges, mode, board) {
   let s = E.createGame({
+    board,
     players: Array.from({ length: nPlayers }, (_, i) => ({ name: 'P' + i })),
     epidemics,
     eventCount: mode === 'team' ? 2 * nPlayers : 13,
@@ -202,15 +203,16 @@ const tally = {};
 let vsSeen = 0;
 let teamSeen = 0;
 for (let i = 0; i < N; i++) {
-  // Every 4th game is a team game (4 or 6 players); the rest are co-op with mixed challenges.
+  // Every 4th game is a team game (4 or 6 players); the rest are co-op. Boards cycle through all three.
   const team = i % 4 === 3;
   const mode = team ? 'team' : 'coop';
+  const board = ['cities', 'universities', 'eastasia'][i % 3];
   const challenges = team ? { virulent: i % 8 === 3 } : { virulent: i % 3 !== 0, mutation: i % 2 === 0, lab: i % 2 === 1 };
   const nPlayers = team ? (i % 8 === 3 ? 6 : 4) : 2 + (i % 4);
-  const s = playOne(nPlayers, 4 + (i % 4), challenges, mode);
+  const s = playOne(nPlayers, 4 + (i % 4), challenges, mode, board);
   if (team) teamSeen += 1;
   if (s.challenges.virulent && s.vsPlayed.length) vsSeen += 1;
   const key = s.status === 'won' ? 'won' : s.result;
   tally[key] = (tally[key] || 0) + 1;
 }
-console.log(`Played ${N} random games (co-op + ${teamSeen} team) without errors; ${vsSeen} reached a Virulent Strain epidemic:`, tally);
+console.log(`Played ${N} random games (all three boards, co-op + ${teamSeen} team) without errors; ${vsSeen} reached a Virulent Strain epidemic:`, tally);

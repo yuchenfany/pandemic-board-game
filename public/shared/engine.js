@@ -5,8 +5,9 @@
   else root.Engine = factory(root.PData);
 }(typeof self !== 'undefined' ? self : this, function (D) {
   'use strict';
-  const { CITIES, ADJ, COLORS, ROLES, EVENTS, VIRULENT, MUTATION_EVENTS, SEQUENCES, SEQ_BY_ID, GOALS, GOAL_BY_ID, BONUS_PRESTIGE } = D;
-  const CITY_NAMES = Object.keys(CITIES);
+  // CITIES / ADJ / CITY_NAMES belong to the active board (see D.useBoard); games record theirs in s.board.
+  const { CITIES, ADJ, CITY_NAMES, COLORS, ROLES, EVENTS, VIRULENT, MUTATION_EVENTS, SEQUENCES, SEQ_BY_ID, GOALS, GOAL_BY_ID, BONUS_PRESTIGE } = D;
+  const syncBoard = (s) => { if (s && D.board !== (s.board || D.DEFAULT_BOARD)) D.useBoard(s.board || D.DEFAULT_BOARD); };
   const RATES = [2, 2, 2, 3, 3, 4, 4];
   const HAND_SIZE = { 2: 4, 3: 3, 4: 2, 5: 2 };
   const MAX_OUTBREAKS = 8;
@@ -84,7 +85,9 @@
 
   // excludedRoles: roles a "Random" player can't be given (players may still pick them).
   // customEvents: also shuffle the custom events (New Route, Border Closure) into the deck.
-  function createGame({ players, epidemics = 5, eventCount, challenges = {}, excludedRoles = [], customEvents = false, mode = 'coop' }) {
+  function createGame({ players, epidemics = 5, eventCount, challenges = {}, excludedRoles = [], customEvents = false, mode = 'coop', board = D.DEFAULT_BOARD }) {
+    if (!D.BOARDS[board]) fail('Unknown board');
+    D.useBoard(board);
     const n = players.length;
     const solo = mode === 'solo';
     const team = mode === 'team';
@@ -110,6 +113,7 @@
 
     const colors = mutation ? [...COLORS, 'purple'] : COLORS.slice();
     const s = {
+      board,
       challenges: { mutation, virulent, worldwidePanic, lab },
       colors,
       cubeMax: Object.fromEntries(colors.map(c => [c, c === 'purple' ? purpleCubes : CUBES_PER_COLOR])),
@@ -119,7 +123,7 @@
       boxed: zeroCubes(colors), // cubes removed from the game (Unacceptable Loss)
       activeEvents: [], // lasting/reminder events in play (Improved Sanitation, Infection Zone Ban, Sequencing Breakthrough)
       links: { added: [], cut: [] }, // connections changed by New Route / Border Closure, as sorted [a, b] pairs
-      stations: ['Austin'],
+      stations: [D.START],
       cures: Object.fromEntries(colors.map(c => [c, 'none'])), // none | cured | eradicated
       rateIdx: team ? 2 : 0, // team play starts the infection rate at 2
       outbreaks: 0,
@@ -172,7 +176,7 @@
     s.players = players.map(p => ({
       name: p.name,
       role: p.role || freeRoles.pop(),
-      location: 'Austin',
+      location: D.START,
       hand: [],
       stored: null, // Contingency Planner
       samples: zeroCubes(colors), // Field Operative
@@ -265,19 +269,20 @@
     return s;
   }
 
-  // Pick k research-station cities at least 3 connections apart (and from Austin).
+  // Pick k research-station cities at least 3 connections apart (and from the board's start city).
   function pickTeamStations(s, k) {
+    const start = D.START;
     const chosen = [];
-    for (const c of shuffle(Object.keys(CITIES))) {
-      if (c === 'Austin') continue;
-      if (pilotDistance(s, 'Austin', c) < 3) continue;
+    for (const c of shuffle(CITY_NAMES)) {
+      if (c === start) continue;
+      if (pilotDistance(s, start, c) < 3) continue;
       if (chosen.every(x => pilotDistance(s, x, c) >= 3)) chosen.push(c);
       if (chosen.length === k) break;
     }
-    // Fallback (should not happen on the standard map): fill from any far cities.
-    for (const c of shuffle(Object.keys(CITIES))) {
+    // Fallback (small/dense boards): fill from any other cities.
+    for (const c of shuffle(CITY_NAMES)) {
       if (chosen.length === k) break;
-      if (c !== 'Austin' && !chosen.includes(c)) chosen.push(c);
+      if (c !== start && !chosen.includes(c)) chosen.push(c);
     }
     return chosen;
   }
@@ -1098,6 +1103,7 @@
   // ---------------------------------------------------------------- actions
 
   function apply(state, pid, action) {
+    syncBoard(state);
     const s = JSON.parse(JSON.stringify(state));
     doApply(s, pid, action || {});
     checkWin(s);
@@ -1698,6 +1704,7 @@
 
   // What clients get to see: hide deck order, expose counts and legitimately revealed cards.
   function view(s) {
+    syncBoard(s);
     const v = JSON.parse(JSON.stringify(s));
     v.playerDeckCount = s.playerDeck.length;
     v.epidemicsLeft = s.playerDeck.filter(isEpidemic).length;
@@ -1718,7 +1725,7 @@
   }
 
   return {
-    GameError, createGame, apply, view, adj, getMoveOptions, getShareOptions, cardsNeededForCure, cureCards, leaveBlocked,
+    GameError, createGame, syncBoard, apply, view, adj, getMoveOptions, getShareOptions, cardsNeededForCure, cureCards, leaveBlocked,
     isCity, isEvent, isEpidemic, isMutationEvent, isMutationCard, isBonus, vsKeyOf, eventKey, cardName, handLimit,
     RATES, MAX_STATIONS, MAX_OUTBREAKS, infectAdj,
     labLineComplete: lineComplete, labSpotNeed: spotNeed, labSpotAccepts: spotAccepts,

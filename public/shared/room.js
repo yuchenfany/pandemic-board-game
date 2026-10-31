@@ -22,7 +22,7 @@
       this.code = code;
       this.seats = [];
       this.hostToken = null;
-      this.config = { mode: 'coop', epidemics: 5, eventsPerPlayer: 2, challenges: { lab: false, virulent: false, mutation: false, worldwidePanic: false }, excludedRoles: [], customEvents: true };
+      this.config = { mode: 'coop', board: D.DEFAULT_BOARD, epidemics: 5, eventsPerPlayer: 2, challenges: { lab: false, virulent: false, mutation: false, worldwidePanic: false }, excludedRoles: [], customEvents: true };
       this.game = null;
       this.chat = [];
       if (saved) Object.assign(this, saved, { code });
@@ -30,6 +30,8 @@
       this.config.excludedRoles = this.config.excludedRoles || [];
       if (typeof this.config.customEvents !== 'boolean') this.config.customEvents = true;
       if (!['coop', 'solo', 'team'].includes(this.config.mode)) this.config.mode = 'coop';
+      if (!D.BOARDS[this.config.board]) this.config.board = D.DEFAULT_BOARD;
+      if (this.game) Engine.syncBoard(this.game);
     }
 
     toJSON() {
@@ -134,6 +136,7 @@
         if (!this.config.challenges.mutation) this.config.challenges.worldwidePanic = false;
       }
       if (typeof cfg.customEvents === 'boolean') this.config.customEvents = cfg.customEvents;
+      if (typeof cfg.board === 'string' && D.BOARDS[cfg.board]) this.config.board = cfg.board;
       if (Array.isArray(cfg.excludedRoles)) this.config.excludedRoles = [...new Set(cfg.excludedRoles.filter(k => D.ROLES[k]))];
     }
 
@@ -155,6 +158,7 @@
         excludedRoles: this.config.excludedRoles,
         customEvents: this.config.customEvents,
         mode: this.config.mode,
+        board: this.config.board,
       });
     }
 

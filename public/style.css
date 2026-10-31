@@ -337,6 +337,10 @@ a.link:hover { text-decoration: underline; }
 .ref .credits a { color: var(--accent); }
 #infectstrip .icard b { font-size: 15px; }
 #infectstrip .icard span { font-size: 12px; color: var(--muted); }
+/* East Asia board: simplified Chinese name next to the city, province underneath */
+.zh { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; font-style: normal; }
+#infectstrip .icard .zh { font-size: 15px; color: var(--text, #fff); }
+#infectstrip .icard .loc { font-size: 11px; color: var(--muted); margin-top: 1px; }
 #infectstrip .icard.ob { border-color: var(--danger); border-left-color: var(--c); }
 #infectstrip .icard.ob span { color: var(--danger); font-weight: 700; letter-spacing: 1px; }
 #infectstrip .icard.muted { opacity: .75; }
@@ -394,3 +398,16 @@ details.exclude summary { cursor: pointer; color: var(--muted); font-size: 13px;
 .team-head.current { border-left-color: var(--gold); background: rgba(230,185,74,.08); }
 .team-head .prestige { margin-left: auto; font-weight: 700; color: var(--gold); }
 .seat .tag { margin-left: 4px; }
+/* Bedtime dialogs use the top layer, above game dialogs and animations. */
+#bedtimeLock, #bedtimeSettings { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: 16px; padding: 28px; width: min(480px, calc(100vw - 32px)); max-height: 90vh; overflow: auto; }
+#bedtimeLock::backdrop { background: var(--bg); }
+#bedtimeSettings::backdrop { background: rgba(0,0,0,.75); }
+#bedtimeButton { position: fixed; right: 12px; bottom: 8px; z-index: 9; font-size: 11px; padding: 3px 8px; }
+#bedtimeWarning { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 40;
+  width: max-content; max-width: 92vw; padding: 10px 16px; border-radius: 8px; background: var(--gold); color: #171200; pointer-events: none; }
+#bedtimeError { color: var(--danger); }
+
+/* local-names mode: toggle on the map and native names on hand cards */
+#zoom button.on { background: #2d6cdf; color: #fff; }
+.pcard .cl { font-size: 12px; margin-top: 2px; color: #3a4452; font-family: 'Noto Sans CJK SC','PingFang SC','Hiragino Sans','Yu Gothic','Malgun Gothic','Microsoft YaHei',sans-serif; }

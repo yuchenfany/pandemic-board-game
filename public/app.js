@@ -1,16 +1,27 @@
-/* global PData, Engine, Room, HostNet, GuestNet */
+/* global PData, Engine, Room, HostNet, GuestNet, Bedtime */
 'use strict';
 const { CITIES, COLORS, COLOR_HEX, ROLES, EVENTS, DIFFICULTIES, EDGES, MAP_W, MAP_H } = PData;
-const CITY_NAMES = Object.keys(CITIES).sort();
+// CITIES / EDGES are the active board's (PData.useBoard swaps them in place); syncBoard follows the game's board.
+let CITY_NAMES = Object.keys(CITIES).sort();
+let namesBoard = PData.board;
+function syncBoard(g) {
+  if (g) Engine.syncBoard(g);
+  if (namesBoard === PData.board) return;
+  namesBoard = PData.board;
+  CITY_NAMES = Object.keys(CITIES).sort();
+  LOG_RE = logRe();
+  ui.prevCubes = null;
+}
 const ICON = { blue: '🔵', yellow: '🟡', black: '⚫', red: '🔴', purple: '🟣' };
 const gcolors = (g) => (g && g.colors) || COLORS;
 
 let net = null;
+const store0 = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
 const ui = {
   // you: the seat this screen is acting as; self: this device's own seat; mine: every seat
   // this device controls (self + hotseat players). autoFocus: last seat we switched to automatically.
   room: null, game: null, you: -1, self: -1, mine: [], autoFocus: null, lobbySeat: null, pawn: null, tab: 'log', chatSeen: 0, forecastFor: null,
-  logSeen: null, view: { x: 0, y: 0, w: MAP_W, h: MAP_H }, dragged: false,
+  logSeen: null, localNames: !!store0('pandemic:localnames'), view: { x: 0, y: 0, w: MAP_W, h: MAP_H }, dragged: false,
 };
 const $ = (sel) => document.querySelector(sel);
 
@@ -129,6 +140,7 @@ function wire(n) {
   n.on('state', (data) => {
     const prevTurn = ui.game && ui.game.turnNo;
     ui.room = data.room; ui.game = data.game; ui.self = data.you; ui.mine = data.mine || [data.you];
+    syncBoard(ui.game);
     if (!ui.mine.includes(ui.you)) ui.you = ui.self;
     if (ui.game && ui.game.turnNo !== prevTurn) ui.pawn = null;
     focusSeat();
@@ -182,6 +194,7 @@ function leaveRoom() {
 }
 
 function hostNewRoom(name) {
+  if (!Bedtime.canPlay()) return;
   const code = Room.newCode();
   net = new HostNet(code, new Room(code));
   wire(net);
@@ -203,6 +216,7 @@ function resumeHosting(sess, saved) {
 }
 
 function joinRoom(code, joinData) {
+  if (!joinData.token && !Bedtime.canPlay()) return;
   net = new GuestNet(code);
   wire(net);
   connectingScreen(`Connecting to room ${code}…`);
@@ -265,7 +279,8 @@ function boot() {
   if (sess && (!urlRoom || urlRoom === sess.code)) {
     const saved = sess.host ? HostNet.savedRoom(sess.code) : null;
     // A game saved by an older version (e.g. before cities were renamed) can't be resumed.
-    if (saved && saved.game && Object.keys(saved.game.cubes).some(c => !CITIES[c])) saved.game = null;
+    const savedCities = saved && saved.game && (PData.BOARDS[saved.game.board || PData.DEFAULT_BOARD] || {}).cities;
+    if (saved && saved.game && (!savedCities || Object.keys(saved.game.cubes).some(c => !savedCities[c]))) saved.game = null;
     if (sess.host && saved) return resumeHosting(sess, saved);
     if (!sess.host) return joinRoom(sess.code, { token: sess.token, name: store.get('pandemic:name') });
     setSession(null);
@@ -339,6 +354,9 @@ function renderLobby() {
   const diffSel = h('select', { disabled: !isHost, onchange: (e) => req('config', { epidemics: Number(e.target.value) }) },
     DIFFICULTIES.map(d => h('option', { value: d.epidemics }, `${d.name} — ${d.epidemics} epidemics`)));
   diffSel.value = cfg.epidemics;
+  const boardSel = h('select', { disabled: !isHost, onchange: (e) => req('config', { board: e.target.value }) },
+    Object.entries(PData.BOARDS).map(([key, b]) => h('option', { value: key }, b.name)));
+  boardSel.value = cfg.board || PData.DEFAULT_BOARD;
   const evSel = h('select', { disabled: !isHost, onchange: (e) => req('config', { eventsPerPlayer: Number(e.target.value) }) },
     [0, 1, 2, 3].map(n => h('option', { value: n }, `${n} per player${n === 2 ? ' (recommended)' : ''}`)));
   evSel.value = cfg.eventsPerPlayer;
@@ -404,6 +422,7 @@ function renderLobby() {
         h('label', null, 'Mode', modeSel),
         mode === 'solo' ? h('p', { class: 'fine' }, 'Solo: 1 player with help from the CDC. Dispatcher, Researcher, Epidemiologist and Local Liaison are not used.') : null,
         mode === 'team' ? h('p', { class: 'fine' }, 'Team: 4 or 6 players in rival 2-player teams. Goal cards are shown to everyone (true secrecy isn’t possible online).') : null,
+        h('label', null, 'Board', boardSel),
         h('label', null, 'Difficulty', diffSel),
         h('label', null, 'Event cards', evSel),
         h('label', null, 'Challenges'), challenges,
@@ -439,10 +458,12 @@ function renderLobby() {
 // ------------------------------------------------------------ map
 
 let mapBuilt = false;
+let mapBoard = null;
 
 // Pandemic-board style continents: glowing coastline over a gridded blue landmass.
 function landLayers(id) {
-  const land = typeof WORLD_LAND === 'string' ? WORLD_LAND : '';
+  const g = typeof self !== 'undefined' ? self : window;
+  const land = typeof g[PData.BOARDS[PData.board].land] === 'string' ? g[PData.BOARDS[PData.board].land] : '';
   const defs = s('defs', null,
     s('linearGradient', { id: `${id}-land`, x1: 0, y1: 0, x2: 0, y2: 1 },
       s('stop', { offset: '0%', 'stop-color': '#24577a' }), s('stop', { offset: '100%', 'stop-color': '#173f5c' })),
@@ -461,6 +482,11 @@ const pawnEls = [];
 
 function buildMap() {
   const svg = $('#map');
+  svg.innerHTML = '';
+  for (const k of Object.keys(edgeEls)) delete edgeEls[k];
+  pawnEls.length = 0;
+  ui.prevCubes = null;
+  mapBoard = PData.board;
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   svg.append(...landLayers('m'));
   const edges = s('g');
@@ -482,7 +508,8 @@ function buildMap() {
     cities.append(g);
   });
   svg.append(edges, s('g', { id: 'xedges' }), s('g', { id: 'dyn', class: 'dyn' }), cities, s('g', { id: 'pawns' }), s('g', { id: 'fx', class: 'dyn' }));
-  setupPanZoom(svg);
+  if (!mapBuilt) setupPanZoom(svg);
+  Object.assign(ui.view, { x: 0, y: 0, w: MAP_W, h: MAP_H });
   applyView();
   mapBuilt = true;
 }
@@ -567,12 +594,32 @@ function setupPanZoom(svg) {
   };
   svg.addEventListener('pointerup', end);
   svg.addEventListener('pointercancel', end);
-  document.querySelectorAll('#zoom button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#zoom button[data-zoom]').forEach(b => b.addEventListener('click', () => {
     const v = ui.view;
     if (b.dataset.zoom === 'reset') { Object.assign(v, { x: 0, y: 0, w: MAP_W, h: MAP_H }); applyView(); return; }
     zoomAt(b.dataset.zoom === 'in' ? 1 / 1.3 : 1.3, v.x + v.w / 2, v.y + v.h / 2);
   }));
 }
+
+// Local-names mode (China/Japan/Korea board): map labels show each city in its own script.
+const nm = (city) => (ui.localNames && CITIES[city] && CITIES[city].local) || city;
+const bothNames = (city) => CITIES[city] && CITIES[city].local ? `${city} · ${CITIES[city].local}` : city;
+function applyLocalNames() {
+  const has = !!(CITIES[CITY_NAMES[0]] && CITIES[CITY_NAMES[0]].local);
+  const btn = $('#namesBtn');
+  btn.classList.toggle('hidden', !has);
+  btn.classList.toggle('on', has && ui.localNames);
+  document.querySelectorAll('#map .city').forEach((g) => {
+    const name = g.dataset.city, c = CITIES[name];
+    g.querySelector('text').textContent = has ? nm(name) : name;
+  });
+}
+$('#namesBtn').addEventListener('click', () => {
+  ui.localNames = !ui.localNames;
+  try { localStorage.setItem('pandemic:localnames', JSON.stringify(ui.localNames)); } catch { /* blocked */ }
+  applyLocalNames();
+  if (ui.game) render();
+});
 
 function showTip(city) {
   (edgeEls[city] || []).forEach(e => e.classList.add('hot'));
@@ -585,7 +632,8 @@ function showTip(city) {
   const tip = $('#tip');
   tip.innerHTML = '';
   tip.append(...[
-    h('b', null, city), ' ', h('span', { class: 'muted' }, `· ${c.color}`),
+    h('b', null, city), ' ', (c.local || c.zh) ? h('span', { class: 'zh' }, c.local || c.zh) : null, ' ', h('span', { class: 'muted' }, `· ${c.color}`),
+    c.region ? h('div', { class: 'muted small' }, c.region) : null,
     h('div', null, cubes || h('span', { class: 'muted' }, 'No disease cubes')),
     g.stations.includes(city) ? h('div', null, '🏥 Research station') : null,
     here.length ? h('div', null, '👤 ', here.join(', ')) : null,
@@ -605,7 +653,8 @@ function hideTip() {
 }
 
 function renderMap(g, delays = {}) {
-  if (!mapBuilt) buildMap();
+  if (!mapBuilt || mapBoard !== PData.board) buildMap();
+  applyLocalNames();
   renderLinks(g);
   const prev = ui.prevCubes;
   const reach = new Set();
@@ -786,7 +835,8 @@ function infectCard(city, color, note, cls = '') {
   const ph = PHOTOS[city];
   strip.append(h('div', { class: `icard ${cls}`, style: { '--c': COLOR_HEX[color] || '#6b7a8f' } },
     ph ? h('div', { class: 'ph' }, h('img', { src: ph.src, alt: city }), h('small', null, `📷 ${ph.author} · ${ph.license}`)) : null,
-    h('div', { class: 'txt' }, h('b', null, city), h('span', null, note))));
+    h('div', { class: 'txt' }, h('b', { title: bothNames(city) }, nm(city)), h('span', null, note)),
+    CITIES[city] && CITIES[city].region ? h('div', { class: 'loc' }, CITIES[city].region) : null));
   while (strip.children.length > 6) strip.firstChild.remove();
   clearTimeout(stripTimer);
   stripTimer = setTimeout(() => { strip.innerHTML = ''; }, 3500);
@@ -908,7 +958,7 @@ const chip = (card, opts = {}) => {
     return h('span', { class: 'chip event' + (opts.onclick ? ' clickable' : ''), 'data-tip': ev.text, 'data-tip-title': ev.name, onclick: opts.onclick }, '★ ' + ev.name);
   }
   const col = CITIES[card] ? CITIES[card].color : 'black';
-  return h('span', { class: `chip ${col}` + (opts.onclick ? ' clickable' : ''), style: { background: COLOR_HEX[col] }, onclick: opts.onclick }, card);
+  return h('span', { class: `chip ${col}` + (opts.onclick ? ' clickable' : ''), style: { background: COLOR_HEX[col] }, title: bothNames(card), onclick: opts.onclick }, nm(card));
 };
 
 // Fetch the city photos in the background once a game is on screen, so infection cards show them instantly.
@@ -1123,10 +1173,10 @@ function renderHand(g) {
     }
     const tip = isEv ? { 'data-tip': EVENTS[Engine.eventKey(card)].text + ' Click to play.', 'data-tip-title': EVENTS[Engine.eventKey(card)].name }
       : isBon ? { 'data-tip': 'Held at game end, worth prestige (team game).', title: over ? 'Click to discard' : 'Bonus card' }
-        : { title: over ? 'Click to discard' : `${CITIES[card].color} city card` };
+        : { title: (over ? 'Click to discard · ' : '') + `${bothNames(card)} · ${CITIES[card].color} city card` };
     return h('div', { class: 'pcard' + (isEv ? ' event' : '') + (onclick ? ' clickable' : '') + (over && !stored ? ' discard' : '') + (card === me.location ? ' here' : ''),
       style: { '--c': isEv ? '#9c6a00' : isBon ? '#8a6d1f' : COLOR_HEX[CITIES[card].color] }, 'data-card': isEv ? EVENTS[Engine.eventKey(card)].name : card, ...tip, onclick },
-    h('div', { class: 'cn' }, isEv ? '★ ' + EVENTS[Engine.eventKey(card)].name : isBon ? '✦ Bonus' : card),
+    h('div', { class: 'cn' }, isEv ? '★ ' + EVENTS[Engine.eventKey(card)].name : isBon ? '✦ Bonus' : nm(card)),
     h('div', { class: 'cc' }, isEv ? (stored ? 'stored event' : 'event · play anytime') : isBon ? 'team bonus' : CITIES[card].color));
   };
   sorted.forEach(c => box.append(cardEl(c, false)));
@@ -1794,13 +1844,14 @@ function maybeOpenForecast(g) {
 // Colour city names (by their disease) and disease names in log lines.
 const LOG_TEXT = { blue: '#79adff', yellow: '#f2c230', black: '#b9c1cd', red: '#ff6e64', purple: '#c58cff' };
 const escapeRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const LOG_RE = new RegExp('(' + [...Object.keys(CITIES).sort((a, b) => b.length - a.length).map(escapeRe),
+const logRe = () => new RegExp('(' + [...Object.keys(CITIES).sort((a, b) => b.length - a.length).map(escapeRe),
   '\\bblue\\b', '\\byellow\\b', '\\bblack\\b', '\\bred\\b', '\\bpurple\\b'].join('|') + ')', 'g');
+let LOG_RE = logRe();
 function colorize(msg) {
   return msg.split(LOG_RE).map((part, i) => {
     if (i % 2 === 0) return part;
     const color = CITIES[part] ? CITIES[part].color : part;
-    return h('span', { class: CITIES[part] ? 'lc' : 'ld', style: { color: LOG_TEXT[color] } }, part);
+    return h('span', { class: CITIES[part] ? 'lc' : 'ld', style: { color: LOG_TEXT[color] } }, CITIES[part] ? nm(part) : part);
   });
 }
 
