@@ -60,6 +60,24 @@
   const zeroCubes = (colors) => Object.fromEntries(colors.map(c => [c, 0]));
   const vsOn = (s, key) => !!s.virulent && (s.vsEffects || []).includes(key);
 
+  // Lasting/reminder events (Improved Sanitation, Infection Zone Ban, Sequencing Breakthrough).
+  const REMINDER_EVENTS = { improvedSanitation: true, infectionZoneBan: true, sequencingBreakthrough: true };
+  const hasActive = (s, key) => (s.activeEvents || []).some(e => e.key === key);
+  // When a reminder event ends, its card finally goes to the discard pile (or out of the game if it was stored).
+  function disposeEventCard(s, e) {
+    if (e.disp === 'removed') s.removed.push(e.card);
+    else s.playerDiscard.push(e.card);
+  }
+  function expireEvents(s, pred) {
+    if (!s.activeEvents) return;
+    s.activeEvents = s.activeEvents.filter(e => {
+      if (!pred(e)) return true;
+      disposeEventCard(s, e);
+      log(s, `${EVENTS[e.key].name} has ended.`);
+      return false;
+    });
+  }
+
   // ---------------------------------------------------------------- setup
 
   // excludedRoles: roles a "Random" player can't be given (players may still pick them).
@@ -69,6 +87,8 @@
     if (n < 2 || n > 5) fail('Pandemic needs 2 to 5 players');
     if (epidemics < 4 || epidemics > 7) fail('Epidemics must be 4-7');
     const mutation = !!challenges.mutation, virulent = !!challenges.virulent;
+    const worldwidePanic = mutation && !!challenges.worldwidePanic;
+    const purpleCubes = worldwidePanic ? 24 : PURPLE_CUBES;
 
     const roleKeys = Object.keys(ROLES);
     const chosen = players.map(p => p.role).filter(Boolean);
@@ -79,12 +99,14 @@
 
     const colors = mutation ? [...COLORS, 'purple'] : COLORS.slice();
     const s = {
-      challenges: { mutation, virulent },
+      challenges: { mutation, virulent, worldwidePanic },
       colors,
+      cubeMax: Object.fromEntries(colors.map(c => [c, c === 'purple' ? purpleCubes : CUBES_PER_COLOR])),
       players: [],
       cubes: Object.fromEntries(CITY_NAMES.map(c => [c, zeroCubes(colors)])),
-      supply: Object.fromEntries(colors.map(c => [c, c === 'purple' ? PURPLE_CUBES : CUBES_PER_COLOR])),
+      supply: Object.fromEntries(colors.map(c => [c, c === 'purple' ? purpleCubes : CUBES_PER_COLOR])),
       boxed: zeroCubes(colors), // cubes removed from the game (Unacceptable Loss)
+      activeEvents: [], // lasting/reminder events in play (Improved Sanitation, Infection Zone Ban, Sequencing Breakthrough)
       links: { added: [], cut: [] }, // connections changed by New Route / Border Closure, as sorted [a, b] pairs
       stations: ['Austin'],
       cures: Object.fromEntries(colors.map(c => [c, 'none'])), // none | cured | eradicated
@@ -113,12 +135,18 @@
 
     // Initial infections happen before pawns are placed, so no role protects them.
     log(s, 'Setting up initial infections.');
-    for (const count of [3, 3, 3, 2, 2, 2, 1, 1, 1]) {
+    // Worldwide Panic seeds extra purple cubes on the 1st, 4th and 7th cities drawn.
+    const wwpPurple = { 0: 1, 3: 2, 6: 3 };
+    [3, 3, 3, 2, 2, 2, 1, 1, 1].forEach((count, i) => {
       const card = s.infectionDeck.pop();
       placeCubes(s, card, CITIES[card].color, count, new Set());
       s.infectionDiscard.push(card);
       log(s, `${card} infected with ${count} ${CITIES[card].color} cube${count > 1 ? 's' : ''}.`);
-    }
+      if (worldwidePanic && wwpPurple[i]) {
+        placeCubes(s, card, 'purple', wwpPurple[i], new Set());
+        log(s, `${card} also seeded with ${wwpPurple[i]} purple cube${wwpPurple[i] > 1 ? 's' : ''} (Worldwide Panic).`);
+      }
+    });
     if (mutation) s.infectionDiscard.push('MUTATION1', 'MUTATION2');
 
     s.players = players.map(p => ({
@@ -169,6 +197,8 @@
       s.travelBan = null;
       log(s, 'Commercial Travel Ban has ended.');
     }
+    // Improved Sanitation / Infection Zone Ban last until their player's next turn begins.
+    expireEvents(s, (e) => (e.key === 'improvedSanitation' || e.key === 'infectionZoneBan') && e.owner === idx);
     s.turn = {
       phase: 'actions', // actions | draw | epidemic | infect | over
       actionsLeft: s.players[idx].role === 'generalist' ? 5 : 4,
@@ -238,6 +268,23 @@
     return out;
   }
 
+  // Shortest number of connections between two cities (Pilot flies up to 3); Infinity if farther.
+  function pilotDistance(s, from, to) {
+    if (from === to) return 0;
+    let frontier = [from];
+    const seen = new Set([from]);
+    for (let d = 1; d <= 3; d++) {
+      const next = [];
+      for (const c of frontier) for (const nb of adj(s, c)) {
+        if (seen.has(nb)) continue;
+        if (nb === to) return d;
+        seen.add(nb); next.push(nb);
+      }
+      frontier = next;
+    }
+    return Infinity;
+  }
+
   function isProtected(s, city, color) {
     return s.players.some(p =>
       (p.role === 'quarantineSpecialist' && (p.location === city || adj(s, p.location).includes(city))) ||
@@ -253,7 +300,16 @@
       return;
     }
     for (let i = 0; i < n; i++) {
-      if (s.cubes[city][color] >= 3) { outbreak(s, city, color, chain); return; }
+      if (s.cubes[city][color] >= 3) {
+        // Infection Zone Ban: a cube that would cause a chain-reaction outbreak (one inside an
+        // ongoing chain) is simply not placed, so no further outbreak happens.
+        if (chain.size > 0 && hasActive(s, 'infectionZoneBan')) {
+          log(s, `Infection Zone Ban: chain-reaction outbreak in ${city} ignored.`);
+          return;
+        }
+        outbreak(s, city, color, chain);
+        return;
+      }
       if (s.supply[color] <= 0) { lose(s, `Ran out of ${color} disease cubes.`); return; }
       s.cubes[city][color]++;
       s.supply[color]--;
@@ -263,13 +319,16 @@
   function outbreak(s, city, color, chain) {
     if (chain.has(city)) return;
     chain.add(city);
+    const isFirst = chain.size === 1; // this outbreak is not itself a chain reaction
     const step = (color === s.virulent && vsOn(s, 'slipperySlope')) ? 2 : 1;
     s.outbreaks += step;
     log(s, `OUTBREAK in ${city} (${color})! Outbreaks: ${Math.min(s.outbreaks, MAX_OUTBREAKS)}/${MAX_OUTBREAKS}.` +
       (step === 2 ? ' (Slippery Slope: +2)' : ''));
     if (s.outbreaks >= MAX_OUTBREAKS) { lose(s, `${MAX_OUTBREAKS} outbreaks occurred.`); return; }
+    // Highly Contagious: a first (non-chain) Virulent Strain outbreak spreads 2 cubes to each city.
+    const spread = (isFirst && color === s.virulent && vsOn(s, 'highlyContagious')) ? 2 : 1;
     for (const nb of infectAdj(s, city)) {
-      placeCubes(s, nb, color, 1, chain);
+      placeCubes(s, nb, color, spread, chain);
       if (s.status !== 'playing') return;
     }
   }
@@ -355,6 +414,12 @@
     const special = s.turn.flags.specialOrders === pawnIdx;
     if (!own && !dispatcher && !special) return res;
     if (leaveBlocked(s, pawnIdx)) return res;
+    // The Pilot, moving their own pawn, can only fly (up to 3 connections) — no driving or flights.
+    // When another player moves the Pilot (Dispatcher / Special Orders), normal movement applies instead.
+    if (own && pawn.role === 'pilot') {
+      const d = pilotDistance(s, from, to);
+      return (d >= 1 && d <= 3) ? [{ method: 'pilot', label: `Pilot flight (${d} connection${d > 1 ? 's' : ''})` }] : [];
+    }
     const has = (c) => actor.hand.includes(c);
 
     // A neighbouring city is always reached by Drive/Ferry: it's free, so flights there would only waste a card.
@@ -396,8 +461,9 @@
   function cardsNeededForCure(s, p, color, useSamples) {
     let n = p.role === 'scientist' ? 4 : 5;
     if (color && color === s.virulent && vsOn(s, 'complexMolecularStructure') && s.cures[color] === 'none') n++;
+    n -= (s.activeEvents || []).filter(e => e.key === 'sequencingBreakthrough').length; // Sequencing Breakthrough
     if (useSamples) n -= 2;
-    return n;
+    return Math.max(1, n);
   }
   // Hand cards that can count toward curing `color`.
   function cureCards(s, p, color) {
@@ -540,7 +606,8 @@
           log(s, 'A Mutation card was drawn.');
           if (s.cures.purple !== 'eradicated') {
             const c = drawBottomCity(s);
-            if (c) { infectCity(s, c, 1, 'purple', ' — Mutation'); s.infectionDiscard.push(c); }
+            // Worldwide Panic Mutation cards place 2 purple cubes instead of 1.
+            if (c) { infectCity(s, c, s.challenges.worldwidePanic ? 2 : 1, 'purple', ' — Mutation'); s.infectionDiscard.push(c); }
           }
           s.infectionDiscard.push(card);
         } else {
@@ -580,6 +647,26 @@
     const p = s.players[pid];
     const card = a.card;
     if (!isEvent(card)) fail('That is not an event card');
+    const key = eventKey(card);
+    const ev = EVENTS[key];
+
+    // Reminder events stay in play (not in the discard pile) until they expire; the card is
+    // only disposed of then. A stored event leaves the game when it finally expires.
+    if (REMINDER_EVENTS[key]) {
+      let disp;
+      if (a.fromStored) {
+        if (p.stored !== card) fail('That event is not stored on your role card');
+        p.stored = null; disp = 'removed';
+      } else {
+        if (!removeOne(p.hand, card)) fail(`${p.name} does not have ${cardName(card)}`);
+        disp = 'discard';
+      }
+      if (key === 'infectionZoneBan' && hasActive(s, 'infectionZoneBan')) { /* stacking is harmless */ }
+      s.activeEvents.push({ key, owner: pid, card, disp });
+      log(s, `${p.name} played ${ev.name}.`);
+      return;
+    }
+
     if (a.fromStored) {
       if (p.stored !== card) fail('That event is not stored on your role card');
       p.stored = null;
@@ -587,9 +674,7 @@
     } else {
       discardFromHand(s, p, card);
     }
-    const key = eventKey(card);
     const prm = a.params || {};
-    const ev = EVENTS[key];
     const inActions = s.turn.phase === 'actions';
     log(s, `${p.name} played ${ev.name}.`);
 
@@ -780,13 +865,26 @@
           discardFromHand(s, p, a.card);
           s.turn.flags.opsMove = true;
         }
+        // Pilot may carry 1 other pawn from the same city.
+        let passenger = null;
+        if (opt.method === 'pilot' && Number.isInteger(a.passenger) && a.passenger !== pawn) {
+          const pg = s.players[a.passenger];
+          if (!pg) fail('Pick a valid passenger');
+          if (pg.location !== from) fail('A passenger must start in the same city as the Pilot');
+          passenger = a.passenger;
+        }
         movePawn(s, pawn, a.to, opt.method);
         log(s, `${s.players[pawn].name} moved ${from} → ${a.to} (${opt.label}${opt.method === 'ops' ? `, discarded ${a.card}` : ''}).`);
+        if (passenger != null) {
+          movePawn(s, passenger, a.to, 'pilot');
+          log(s, `${s.players[passenger].name} rode along with the Pilot to ${a.to}.`);
+        }
         spendAction(s);
         break;
       }
       case 'build': {
         requireActionTurn(s, pid);
+        if (p.role === 'pilot') fail('The Pilot cannot build research stations');
         if (s.stations.includes(here)) fail('There is already a research station here');
         if (p.role !== 'opsExpert') discardFromHand(s, p, here);
         if (s.stations.length >= MAX_STATIONS) {
@@ -800,13 +898,26 @@
       case 'treat': {
         requireActionTurn(s, pid);
         const color = a.color;
-        if (!s.colors.includes(color) || s.cubes[here][color] < 1) fail(`No ${color} cubes here`);
+        // Field Director may treat a connected city instead of their own.
+        let target = here;
+        if (a.city && a.city !== here) {
+          if (p.role !== 'fieldDirector') fail('You can only treat disease in your own city');
+          if (!adj(s, here).includes(a.city)) fail('Field Director can only treat a connected city');
+          target = validCity(a.city);
+        }
+        if (!s.colors.includes(color) || s.cubes[target][color] < 1) fail(`No ${color} cubes there`);
+        // Resistant to Treatment: treating the uncured Virulent Strain costs 2 actions.
+        const resistant = color === s.virulent && vsOn(s, 'resistantToTreatment') && s.cures[color] === 'none';
+        if (resistant && s.turn.actionsLeft < 2) fail('Resistant to Treatment: treating the Virulent Strain needs 2 actions');
         const all = p.role === 'medic' || s.cures[color] !== 'none';
-        const k = removeCubes(s, here, color, all ? 3 : 1);
-        if (color === s.virulent) markVsTreated(s, here);
-        log(s, `${p.name} treated ${k} ${color} cube(s) in ${here}.`);
+        // Improved Sanitation: a single-cube treat removes 1 more cube of the same color.
+        const want = all ? 3 : (hasActive(s, 'improvedSanitation') ? 2 : 1);
+        const k = removeCubes(s, target, color, want);
+        if (color === s.virulent) markVsTreated(s, target);
+        log(s, `${p.name} treated ${k} ${color} cube(s) in ${target}.`);
         checkEradication(s);
         spendAction(s);
+        if (resistant) spendAction(s);
         break;
       }
       case 'share': {
@@ -829,18 +940,38 @@
         if (s.cures[color] !== 'none') fail('That disease is already cured');
         const useSamples = !!a.useSamples;
         if (useSamples && (p.role !== 'fieldOperative' || p.samples[color] < 3)) fail('You need 3 samples of that color');
-        const cards = Array.isArray(a.cards) ? a.cards : [];
         const need = cardsNeededForCure(s, p, color, useSamples);
-        const what = color === 'purple' ? 'City cards (any colors)' : `${color} City cards`;
-        if (new Set(cards).size !== cards.length || cards.length !== need) fail(`Select exactly ${need} ${what}`);
+        const cards = Array.isArray(a.cards) ? a.cards : [];
+        // Virologist: pairs of same-color City cards each stand in for 1 cure-color card.
+        const pairs = (p.role === 'virologist' && Array.isArray(a.pairs)) ? a.pairs : [];
         const allowed = cureCards(s, p, color);
-        cards.forEach(c => { if (!allowed.includes(c)) fail(`Invalid card ${c}`); });
-        if (color === 'purple' && !cards.some(c => s.cubes[c].purple > 0)) {
-          fail('At least 1 of the cards must be a city that has purple cubes');
+        const used = [];
+        cards.forEach(c => {
+          if (!allowed.includes(c) || used.includes(c)) fail(`Invalid card ${c}`);
+          used.push(c);
+        });
+        pairs.forEach(pr => {
+          if (!Array.isArray(pr) || pr.length !== 2) fail('Each substitute needs a pair of City cards');
+          const [x, y] = pr;
+          if (!isCity(x) || !isCity(y) || x === y) fail('A pair needs 2 different City cards');
+          if (used.includes(x) || used.includes(y)) fail('A card was used twice');
+          if (!p.hand.includes(x) || !p.hand.includes(y)) fail('Pair cards must be in your hand');
+          if (CITIES[x].color !== CITIES[y].color) fail('Each pair must be 2 cards of the same color');
+          used.push(x, y);
+        });
+        const what = color === 'purple' ? 'City cards (any colors)' : `${color} City cards`;
+        if (cards.length + pairs.length !== need) fail(`Select cards worth exactly ${need} ${what}`);
+        if (color === 'purple') {
+          const min = s.challenges.worldwidePanic ? 2 : 1;
+          if (used.filter(c => s.cubes[c].purple > 0).length < min) {
+            fail(`At least ${min} of the cards must be cities that have purple cubes`);
+          }
         }
-        cards.forEach(c => discardFromHand(s, p, c));
+        used.forEach(c => discardFromHand(s, p, c));
         if (useSamples) { p.samples[color] -= 3; s.supply[color] += 3; }
         s.cures[color] = 'cured';
+        // Sequencing Breakthrough is spent once the next cure is discovered.
+        expireEvents(s, (e) => e.key === 'sequencingBreakthrough');
         log(s, `${p.name} discovered a cure for ${color}!`);
         s.players.forEach((q, qi) => { if (q.role === 'medic') onEnter(s, qi); });
         checkEradication(s);
@@ -893,6 +1024,58 @@
         p.hand.push(a.card);
         s.turn.flags.epidemiologist = true;
         log(s, `${p.name} took ${a.card} from ${q.name}.`);
+        break;
+      }
+      case 'virologistRemove': {
+        requireActionTurn(s, pid);
+        if (p.role !== 'virologist') fail('Only the Virologist can do that');
+        const card = a.card;
+        if (!isCity(card) || !p.hand.includes(card)) fail('Discard a City card from your hand');
+        const color = CITIES[card].color;
+        const city = validCity(a.city);
+        if (s.cubes[city][color] < 1) fail(`There is no ${color} cube in ${city}`);
+        discardFromHand(s, p, card);
+        removeCubes(s, city, color, 1);
+        log(s, `${p.name} discarded ${card} to remove 1 ${color} cube from ${city}.`);
+        checkEradication(s);
+        spendAction(s);
+        break;
+      }
+      case 'fieldDirectorMove': {
+        if (pid !== s.current || s.turn.phase !== 'actions') fail('Only during your actions phase');
+        if (p.role !== 'fieldDirector') fail('Only the Field Director can do that');
+        if (s.turn.flags.fieldDirector) fail('Already used this turn');
+        const i = validPawn(s, a.pawn);
+        if (i === pid) fail("Pick another player's pawn");
+        if (s.players[i].role === 'pilot') fail('The Field Director cannot move the Pilot');
+        const from = s.players[i].location;
+        if (from !== here && !adj(s, here).includes(from)) fail('That pawn must be in your city or a connected city');
+        const to = validCity(a.to);
+        if (!adj(s, from).includes(to)) fail('Drive/Ferry only: pick a city connected to that pawn');
+        const blocked = leaveBlocked(s, i);
+        if (blocked) fail(blocked);
+        movePawn(s, i, to, 'drive');
+        s.turn.flags.fieldDirector = true;
+        log(s, `${p.name} moved ${s.players[i].name} ${from} → ${to} (Field Director, free).`);
+        break;
+      }
+      case 'localLiaisonGive': {
+        requireActionTurn(s, pid);
+        if (p.role !== 'localLiaison') fail('Only the Local Liaison can do that');
+        if (s.turn.flags.localLiaison) fail('Already used this turn');
+        const color = CITIES[here].color;
+        const card = a.card;
+        if (!isCity(card) || !p.hand.includes(card) || CITIES[card].color !== color) {
+          fail(`Give a ${color} City card (matching your city)`);
+        }
+        const i = validPawn(s, a.to);
+        if (i === pid) fail('Give to another player');
+        if (CITIES[s.players[i].location].color !== color) fail(`That player must be in a ${color} city`);
+        removeOne(p.hand, card);
+        s.players[i].hand.push(card);
+        s.turn.flags.localLiaison = true;
+        log(s, `${p.name} gave ${card} to ${s.players[i].name} (Local Liaison).`);
+        spendAction(s);
         break;
       }
       case 'pass':

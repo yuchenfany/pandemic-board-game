@@ -10,7 +10,7 @@ assert.strictEqual(r.hostToken, a.token, 'first joiner hosts');
 assert(r.handle(b.token, 'config', { epidemics: 6 }).error, 'only host configures');
 assert(r.handle(a.token, 'config', { epidemics: 6 }).ok);
 assert(r.handle(a.token, 'config', { challenges: { mutation: true } }).ok);
-assert.deepStrictEqual(r.config.challenges, { virulent: false, mutation: true });
+assert.deepStrictEqual(r.config.challenges, { virulent: false, mutation: true, worldwidePanic: false });
 assert(r.handle(a.token, 'config', { excludedRoles: ['generalist', 'bogus', 'generalist'] }).ok);
 assert.deepStrictEqual(r.config.excludedRoles, ['generalist'], 'excluded roles are validated and de-duplicated');
 assert(r.handle(b.token, 'config', { excludedRoles: [] }).error, 'only host excludes roles');

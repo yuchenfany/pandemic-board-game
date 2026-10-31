@@ -316,6 +316,7 @@ a.link:hover { text-decoration: underline; }
 #alert .box.mut { border-color: #a35ee0; box-shadow: 0 0 80px rgba(155,79,214,.5); }
 #alert .box.mut .big { color: #c58cff; }
 .check.challenge { margin: 4px 0; }
+.check.challenge.sub { margin-left: 22px; }
 .check.challenge.off { color: var(--muted); }
 #logView .lc { font-weight: 600; }
 

@@ -131,7 +131,7 @@
     quarantineSpecialist: { name: 'Quarantine Specialist', color: '#1f7a3d', set: 'base',
       text: 'Prevent disease cube placements (and outbreaks) in your city and all cities connected to it.' },
     researcher: { name: 'Researcher', color: '#9c5b34', set: 'base',
-      text: 'When sharing knowledge, you may give any City card (not only the one for your city). Others may take any City card from you.' },
+      text: 'When sharing knowledge, you may give any City card (not only the one for your city). Others may take any City card from you. (Lab: once per turn at a research station, Sequence a Disease as a free bonus action.)' },
     scientist: { name: 'Scientist', color: '#e8e8e8', set: 'base',
       text: 'You need only 4 City cards of the same color to Discover a Cure.' },
     // On the Brink
@@ -140,13 +140,22 @@
     containmentSpecialist: { name: 'Containment Specialist', color: '#5fc8e8', set: 'brink',
       text: 'When you enter a city, remove 1 cube of each color that has 2 or more cubes there.' },
     epidemiologist: { name: 'Epidemiologist', color: '#b062d6', set: 'brink',
-      text: 'Once during your turn (not an action), take any City card from a player in the same city as you.' },
+      text: 'Once during your turn (not an action), take any City card from a player in the same city as you. (Lab: once per turn at a research station, Process a Sample as a free bonus action.)' },
     fieldOperative: { name: 'Field Operative', color: '#c9a55a', set: 'brink',
       text: 'Once per turn, as an action, move 1 cube from your city onto this card. When discovering a cure, you may replace 2 City cards with 3 cubes of that color from this card.' },
     generalist: { name: 'Generalist', color: '#9aa0a8', set: 'brink',
       text: 'You may take up to 5 actions each turn.' },
     troubleshooter: { name: 'Troubleshooter', color: '#e0524a', set: 'brink',
       text: 'Start your turn by looking at as many Infection cards as the infection rate. When you take a Direct Flight, reveal the City card used but do not discard it.' },
+    // In the Lab
+    virologist: { name: 'Virologist', color: '#c04bb0', set: 'lab',
+      text: 'When you Discover a Cure, you may discard 2 City cards of the same color in place of 1 City card of the cure color (as many pairs as you like). As an action, discard any 1 City card to remove 1 cube of its color from any city.' },
+    fieldDirector: { name: 'Field Director', color: '#1f9e7a', set: 'lab',
+      text: 'You may Treat Disease in a city connected to the one you are in (as well as your own). Once per turn, move another player’s pawn in your city or a connected city by Drive/Ferry, as a free bonus action. You cannot move the Pilot.' },
+    localLiaison: { name: 'Local Liaison', color: '#d98c3a', set: 'lab',
+      text: 'As an action (once per turn), give a City card matching the color of your city to a player in any city of that same color. (Lab: once per turn at a research station, Characterize a Disease or Test a Cure as a free bonus action.)' },
+    pilot: { name: 'Pilot', color: '#3f9bd4', set: 'lab',
+      text: 'You cannot Drive/Ferry, take flights, or build research stations. As an action, fly to any city within 3 connections (skipping cities in between); you may take 1 other pawn in your city along. When moved by the Dispatcher or Special Orders, you move normally instead.' },
   };
 
   // Event texts follow the 2nd-edition cards.
@@ -164,6 +173,10 @@
     reexaminedResearch: { name: 'Re-examined Research', set: 'brink', text: 'Select a player. That player may draw any 1 City card from the Player Discard Pile into their hand.' },
     remoteTreatment: { name: 'Remote Treatment', set: 'brink', text: 'Remove 2 disease cubes from the board.' },
     specialOrders: { name: 'Special Orders', set: 'brink', text: 'This turn, the current player may spend actions to move 1 other pawn as if it were their own.' },
+    // In the Lab (play any time, not an action)
+    improvedSanitation: { name: 'Improved Sanitation', set: 'lab', text: 'Until the start of your next turn, each Treat Disease removes 1 more cube of the same color, if present.' },
+    infectionZoneBan: { name: 'Infection Zone Ban', set: 'lab', text: 'Ignore all chain-reaction outbreaks until the start of your next turn. Outbreaks still occur, but do not spread to cause further outbreaks.' },
+    sequencingBreakthrough: { name: 'Sequencing Breakthrough', set: 'lab', text: 'Discard 1 fewer City card than needed for the next Discover a Cure (any player). Discarded once that cure is found.' },
     // Custom (house) events: they change the map's connections for the rest of the game.
     newRoute: { name: 'New Route', set: 'custom', text: 'Connect 2 cities of the same color that are not already connected. For the rest of the game, pawns can Drive/Ferry along it, but disease does not spread along it.' },
     borderClosure: { name: 'Border Closure', set: 'custom', text: 'Remove up to 2 connections, each between 2 cities. For the rest of the game, pawns cannot Drive/Ferry along them and outbreaks do not spread along them.' },
@@ -187,6 +200,11 @@
       text: 'Remove 4 Virulent Strain cubes from the supply (from the game).' },
     uncountedPopulations: { name: 'Uncounted Populations', continuing: false,
       text: 'Place 1 Virulent Strain cube on each city with exactly 1 of these cubes.' },
+    // In the Lab add-on
+    highlyContagious: { name: 'Highly Contagious', continuing: true,
+      text: 'Virulent Strain outbreaks (but not chain-reaction ones) add 2 cubes to each connected city instead of 1. A connected city with 2 or more Virulent Strain cubes is filled to 3 and has a chain-reaction outbreak.' },
+    resistantToTreatment: { name: 'Resistant to Treatment', continuing: true,
+      text: 'Until the Virulent Strain is cured, removing its cubes with Treat Disease costs 2 actions instead of 1.' },
   };
 
   // Mutation challenge: a 5th (purple) disease with 12 cubes.
@@ -199,6 +217,7 @@
   const CHALLENGES = {
     virulent: { name: 'Virulent Strain', text: 'One disease becomes particularly nasty: special epidemic cards add lasting or immediate effects to it.' },
     mutation: { name: 'Mutation', text: 'A 5th purple disease (only 12 cubes) appears through Mutation cards. Cure it with 5 City cards of any color, at least one from a city with purple cubes.' },
+    worldwidePanic: { name: 'Worldwide Panic', text: 'A harder Mutation scenario: 24 purple cubes, Mutation cards place 2 purple (not 1), extra purple seeded during setup, and the purple cure needs 2 cards from cities with purple cubes.' },
   };
 
   const DIFFICULTIES = [

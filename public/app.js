@@ -340,8 +340,11 @@ function renderLobby() {
   const chalBox = (key) => h('label', { class: 'check challenge', 'data-tip': PData.CHALLENGES[key].text, 'data-tip-title': PData.CHALLENGES[key].name },
     h('input', { type: 'checkbox', checked: !!chal[key], disabled: !isHost, onchange: (e) => req('config', { challenges: { [key]: e.target.checked } }) }),
     PData.CHALLENGES[key].name);
+  const wwpBox = chal.mutation ? h('label', { class: 'check challenge sub', 'data-tip': PData.CHALLENGES.worldwidePanic.text, 'data-tip-title': 'Mutation: Worldwide Panic' },
+    h('input', { type: 'checkbox', checked: !!chal.worldwidePanic, disabled: !isHost, onchange: (e) => req('config', { challenges: { worldwidePanic: e.target.checked } }) }),
+    'Worldwide Panic ', h('span', { class: 'tag' }, 'harder')) : null;
   const challenges = h('div', null,
-    chalBox('virulent'), chalBox('mutation'),
+    chalBox('virulent'), chalBox('mutation'), wwpBox,
     h('label', { class: 'check challenge off', 'data-tip': "Not available online: the Bio-Terrorist's moves must stay secret from everyone, but the host's browser holds the whole game." },
       h('input', { type: 'checkbox', disabled: true }), 'Bio-Terrorist ', h('span', { class: 'tag' }, 'not available')),
     (chal.virulent || chal.mutation) ? h('p', { class: 'fine' }, 'Tip: the rulebook suggests 1 fewer epidemic than usual when adding a challenge.') : null);
@@ -367,7 +370,7 @@ function renderLobby() {
       return h('div', { class: 'role-card' + (mine ? ' mine' : '') + (taken ? ' taken' : ''), style: { '--rc': ro.color },
         onclick: () => !taken && req('pickRole', { role: mine ? null : key, seat: pickFor }) },
       owner >= 0 ? h('span', { class: 'who' }, r.seats[owner].name) : null,
-      h('div', { class: 'rn' }, ro.name, ro.set === 'brink' ? h('span', { class: 'tag' }, 'Brink') : null,
+      h('div', { class: 'rn' }, ro.name, ro.set === 'brink' ? h('span', { class: 'tag' }, 'Brink') : ro.set === 'lab' ? h('span', { class: 'tag' }, 'Lab') : null,
         excluded.includes(key) ? h('span', { class: 'tag', title: 'Never handed out at random' }, 'not random') : null),
       h('div', { class: 'rt' }, ro.text));
     }),
@@ -669,6 +672,8 @@ function onCityClick(city) {
   const blocked = Engine.leaveBlocked(g, pawn);
   if (blocked) { toast(blocked); return; }
   if (!opts.length) { toast(`Can't reach ${city} from ${g.players[pawn].location} with one action`, 'info'); return; }
+  // Pilot flight: offer taking a passenger along.
+  if (opts.length === 1 && opts[0].method === 'pilot') { pilotMove(g, pawn, city); return; }
   const go = (o, card) => send({ type: 'move', pawn, to: city, method: o.method, card });
   const choices = [];
   opts.forEach(o => {
@@ -935,7 +940,8 @@ function renderTopbar(g) {
       g.vsEffects.map(k => h('span', { class: 'tag vs-effect', ...vsTip(k) }, PData.VIRULENT[k].name, ' ⓘ'))]
       : h('span', { class: 'muted small' }, 'unknown')) : null,
     ...[g.quietNight ? h('span', { class: 'tag' }, '🌙 Quiet night') : null,
-      g.travelBan != null ? h('span', { class: 'tag' }, '🚫 Travel ban') : null].filter(Boolean),
+      g.travelBan != null ? h('span', { class: 'tag' }, '🚫 Travel ban') : null,
+      ...(g.activeEvents || []).map(e => h('span', { class: 'tag', 'data-tip': EVENTS[e.key].text, 'data-tip-title': EVENTS[e.key].name }, '🧪 ' + EVENTS[e.key].name))].filter(Boolean),
     h('div', { class: 'topbtns' },
       h('span', { 'data-conn': '' }),
       h('button', { onclick: () => showPile('Player discard pile', g.playerDiscard) }, `Discards (${g.playerDiscard.length})`),
@@ -984,6 +990,8 @@ function showHelp() {
       'Cure purple with 5 City cards of any color (at least 1 from a city with purple cubes). ',
       'Win by curing all 5 diseases, or the other 4 with no purple left on the board.'),
     Object.values(PData.MUTATION_EVENTS).map(v => h('div', null, h('b', null, v.name), ' — ', v.text)),
+    ui.game && ui.game.challenges && ui.game.challenges.worldwidePanic
+      ? h('div', { class: 'muted' }, h('b', null, 'Worldwide Panic: '), PData.CHALLENGES.worldwidePanic.text) : null,
     h('h4', null, 'Photo credits'),
     h('div', { class: 'muted small' }, 'City photos are from Wikimedia Commons (the lead image of each city\'s Wikipedia article), resized. ',
       'Free licences: CC0, public domain, CC BY, CC BY-SA or Free Art License.'),
@@ -1142,14 +1150,14 @@ function renderTurnRow(g) {
     add(sel);
   }
 
-  const canBuild = !g.stations.includes(here) && (me.role === 'opsExpert' || me.hand.includes(here));
+  const canBuild = me.role !== 'pilot' && !g.stations.includes(here) && (me.role === 'opsExpert' || me.hand.includes(here));
   add(btn('🏥', 'Build', () => {
     if (g.stations.length >= Engine.MAX_STATIONS) {
       openForm('Build research station', 'All 6 stations are built. Choose one to move here.',
         [{ name: 'remove', label: 'Remove station from', type: 'select', options: g.stations.map(c => [c, c]) }],
         (v) => send({ type: 'build', remove: v.remove }));
     } else send({ type: 'build' });
-  }, { disabled: !canBuild, title: g.stations.includes(here) ? 'Already a station here' : me.role === 'opsExpert' ? 'No card needed' : `Discard ${here}` }));
+  }, { disabled: !canBuild, title: me.role === 'pilot' ? 'The Pilot cannot build' : g.stations.includes(here) ? 'Already a station here' : me.role === 'opsExpert' ? 'No card needed' : `Discard ${here}` }));
 
   gcolors(g).filter(c => g.cubes[here][c] > 0).forEach(c => add(btn('💉', `Treat ${c}`, () => send({ type: 'treat', color: c }),
     { class: 'colorbtn', style: { '--c': COLOR_HEX[c] } })));
@@ -1163,8 +1171,16 @@ function renderTurnRow(g) {
   const cureColors = gcolors(g).filter(c => {
     if (g.cures[c] !== 'none' || !g.stations.includes(here)) return false;
     const cnt = Engine.cureCards(g, me, c).length;
-    const samples = me.role === 'fieldOperative' && me.samples[c] >= 3;
-    return cnt >= Engine.cardsNeededForCure(g, me, c, false) || (samples && cnt >= Engine.cardsNeededForCure(g, me, c, true));
+    const need = Engine.cardsNeededForCure(g, me, c, false);
+    if (cnt >= need) return true;
+    if (me.role === 'fieldOperative' && me.samples[c] >= 3 && cnt >= Engine.cardsNeededForCure(g, me, c, true)) return true;
+    // Virologist can substitute pairs of same-color cards for cure-color cards.
+    if (me.role === 'virologist' && c !== 'purple') {
+      let pairs = 0;
+      gcolors(g).forEach(col => { if (col !== c) pairs += Math.floor(me.hand.filter(x => Engine.isCity(x) && CITIES[x].color === col).length / 2); });
+      if (cnt + pairs >= need) return true;
+    }
+    return false;
   });
 
   add(btn('🧪', 'Cure', () => cureDialog(g, cureColors), { disabled: !cureColors.length, title: 'At a research station with enough cards of one color' }));
@@ -1187,6 +1203,24 @@ function renderTurnRow(g) {
     add(btn('🔬', 'Take card (free)', () => openChoice('Epidemiologist: take a City card', opts.map(o => ({
       label: `Take ${o.c} from ${g.players[o.qi].name}`, onClick: () => send({ type: 'epidemiologistTake', from: o.qi, card: o.c }),
     }))), { disabled: g.turn.flags.epidemiologist || !opts.length, act: false }));
+  }
+  if (me.role === 'virologist') {
+    add(btn('🧬', 'Remove cube', () => virologistRemoveDialog(g), { disabled: !me.hand.some(Engine.isCity), title: 'Discard any City card to remove 1 cube of its color from any city' }));
+  }
+  if (me.role === 'fieldDirector') {
+    const nearby = Engine.adj(g, here).filter(c => gcolors(g).some(col => g.cubes[c][col] > 0));
+    add(btn('💊', 'Treat nearby', () => fieldDirectorTreatDialog(g, nearby), { disabled: !nearby.length, title: 'Treat disease in a connected city' }));
+    const movable = g.players.map((q, i) => i).filter(i => i !== ui.you && g.players[i].role !== 'pilot'
+      && (g.players[i].location === here || Engine.adj(g, here).includes(g.players[i].location)));
+    add(btn('🧭', 'Move teammate', () => fieldDirectorMoveDialog(g, movable),
+      { disabled: g.turn.flags.fieldDirector || !movable.length, act: false, title: 'Free: Drive/Ferry a teammate in or next to your city' }));
+  }
+  if (me.role === 'localLiaison') {
+    const color = CITIES[here].color;
+    const cards = me.hand.filter(c => Engine.isCity(c) && CITIES[c].color === color);
+    const recips = g.players.map((q, i) => i).filter(i => i !== ui.you && CITIES[g.players[i].location].color === color);
+    add(btn('🎁', 'Give (Liaison)', () => localLiaisonDialog(g, cards, recips),
+      { disabled: g.turn.flags.localLiaison || !cards.length || !recips.length, title: `Give a ${color} card to a player in a ${color} city` }));
   }
 
   add(h('span', { class: 'spacer' }),
@@ -1219,8 +1253,90 @@ function cureDialog(g, colors) {
       send({ type: 'cure', color, cards: boxes.filter(b => b.box.checked).map(b => b.c), useSamples: !!(sampleBox && sampleBox.checked) });
     } }, 'Discover cure')]);
   };
-  if (colors.length === 1) pickColor(colors[0]);
-  else openChoice('Which disease?', colors.map(c => ({ label: `${ICON[c]} ${c}`, onClick: () => pickColor(c) })));
+  const pick = (c) => (me.role === 'virologist' && c !== 'purple') ? virologistCureDialog(g, c) : pickColor(c);
+  if (colors.length === 1) pick(colors[0]);
+  else openChoice('Which disease?', colors.map(c => ({ label: `${ICON[c]} ${c}`, onClick: () => pick(c) })));
+}
+
+// Virologist: pairs of same-color cards each substitute for 1 cure-color card.
+function virologistCureDialog(g, color) {
+  const me = g.players[ui.you];
+  const need = Engine.cardsNeededForCure(g, me, color, false);
+  const boxes = me.hand.filter(Engine.isCity).map(c => ({ c, col: CITIES[c].color, box: h('input', { type: 'checkbox' }) }));
+  const valueEl = h('b', null, '0');
+  const recompute = () => {
+    const sel = boxes.filter(b => b.box.checked);
+    let pairs = 0;
+    gcolors(g).forEach(col => { if (col !== color) pairs += Math.floor(sel.filter(b => b.col === col).length / 2); });
+    const value = sel.filter(b => b.col === color).length + pairs;
+    valueEl.textContent = String(value);
+    valueEl.style.color = value === need ? 'var(--good, #4caf50)' : '';
+  };
+  boxes.forEach(b => b.box.addEventListener('change', recompute));
+  const body = h('div', null,
+    h('p', { class: 'muted' }, `Use ${need} ${color} cards, or substitute any 2 same-color cards for 1 ${color} card (e.g. 2 blue + 2 yellow count as 2).`),
+    h('div', { class: 'muted' }, 'Value selected: ', valueEl, ` / ${need}`),
+    boxes.map(({ c, box }) => h('label', { class: 'check' }, box, chip(c))));
+  openModal(`🧪 Virologist cure: ${color}`, body, [cancelBtn(), h('button', { class: 'primary', onclick: () => {
+    const sel = boxes.filter(b => b.box.checked);
+    const cards = sel.filter(b => b.col === color).map(b => b.c);
+    const pairs = [];
+    gcolors(g).forEach(col => {
+      if (col === color) return;
+      const grp = sel.filter(b => b.col === col).map(b => b.c);
+      for (let i = 0; i + 1 < grp.length; i += 2) pairs.push([grp[i], grp[i + 1]]);
+    });
+    closeModal();
+    send({ type: 'cure', color, cards, pairs });
+  } }, 'Discover cure')]);
+}
+
+function virologistRemoveDialog(g) {
+  const me = g.players[ui.you];
+  openChoice('Discard a card to remove a cube', me.hand.filter(Engine.isCity).map(c => {
+    const col = CITIES[c].color;
+    return { label: `${c} — remove a ${col} cube`, onClick: () => {
+      const cities = CITY_NAMES.filter(x => g.cubes[x][col] > 0);
+      if (!cities.length) return toast(`No ${col} cubes on the board`, 'info');
+      openForm('Remove a cube', `Discard ${c} to remove 1 ${col} cube.`,
+        [{ name: 'city', label: 'City', type: 'select', options: cities.map(x => [x, `${x} (${g.cubes[x][col]})`]) }],
+        (v) => send({ type: 'virologistRemove', card: c, city: v.city }));
+    } };
+  }));
+}
+
+function fieldDirectorTreatDialog(g, nearby) {
+  const choices = [];
+  nearby.forEach(c => gcolors(g).filter(col => g.cubes[c][col] > 0).forEach(col =>
+    choices.push({ label: `${ICON[col]} Treat ${col} in ${c} (${g.cubes[c][col]})`, onClick: () => send({ type: 'treat', color: col, city: c }) })));
+  openChoice('Treat a connected city', choices);
+}
+
+function fieldDirectorMoveDialog(g, movable) {
+  openChoice('Move a teammate (free)', movable.map(i => ({ label: `${g.players[i].name} (${g.players[i].location})`, onClick: () => {
+    const dests = Engine.adj(g, g.players[i].location).slice().sort();
+    openForm('Field Director: move a teammate', `Drive/Ferry ${g.players[i].name} to a connected city.`,
+      [{ name: 'to', label: 'Destination', type: 'select', options: dests.map(c => [c, c]) }],
+      (v) => send({ type: 'fieldDirectorMove', pawn: i, to: v.to }));
+  } })));
+}
+
+function localLiaisonDialog(g, cards, recips) {
+  const color = CITIES[g.players[ui.you].location].color;
+  openForm('Local Liaison: give a card', `Give a ${color} City card to a player in a ${color} city.`,
+    [{ name: 'card', label: 'Card', type: 'select', options: cards.map(c => [c, c]) },
+      { name: 'to', label: 'To', type: 'select', options: recips.map(i => [i, `${g.players[i].name} (${g.players[i].location})`]) }],
+    (v) => send({ type: 'localLiaisonGive', card: v.card, to: Number(v.to) }));
+}
+
+function pilotMove(g, pawn, city) {
+  const from = g.players[pawn].location;
+  const others = g.players.map((q, i) => i).filter(i => i !== pawn && g.players[i].location === from);
+  if (!others.length) return send({ type: 'move', pawn, to: city, method: 'pilot' });
+  openChoice(`Pilot flight to ${city}`, [
+    { label: '✈️ Fly alone', onClick: () => send({ type: 'move', pawn, to: city, method: 'pilot' }) },
+    ...others.map(i => ({ label: `✈️ Take ${g.players[i].name} along`, onClick: () => send({ type: 'move', pawn, to: city, method: 'pilot', passenger: i }) })),
+  ]);
 }
 
 // ------------------------------------------------------------ events

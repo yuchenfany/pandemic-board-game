@@ -22,7 +22,7 @@
       this.code = code;
       this.seats = [];
       this.hostToken = null;
-      this.config = { epidemics: 5, eventsPerPlayer: 2, challenges: { virulent: false, mutation: false }, excludedRoles: [], customEvents: true };
+      this.config = { epidemics: 5, eventsPerPlayer: 2, challenges: { virulent: false, mutation: false, worldwidePanic: false }, excludedRoles: [], customEvents: true };
       this.game = null;
       this.chat = [];
       if (saved) Object.assign(this, saved, { code });
@@ -125,9 +125,11 @@
       if ([4, 5, 6, 7].includes(ep)) this.config.epidemics = ep;
       if ([0, 1, 2, 3].includes(ev)) this.config.eventsPerPlayer = ev;
       if (cfg.challenges && typeof cfg.challenges === 'object') {
-        ['virulent', 'mutation'].forEach(k => {
+        ['virulent', 'mutation', 'worldwidePanic'].forEach(k => {
           if (typeof cfg.challenges[k] === 'boolean') this.config.challenges[k] = cfg.challenges[k];
         });
+        // Worldwide Panic is a Mutation variant; it only applies when Mutation is on.
+        if (!this.config.challenges.mutation) this.config.challenges.worldwidePanic = false;
       }
       if (typeof cfg.customEvents === 'boolean') this.config.customEvents = cfg.customEvents;
       if (Array.isArray(cfg.excludedRoles)) this.config.excludedRoles = [...new Set(cfg.excludedRoles.filter(k => D.ROLES[k]))];

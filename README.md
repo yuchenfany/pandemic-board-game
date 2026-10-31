@@ -1,6 +1,6 @@
 # Pandemic: On the Brink — Online
 
-A multiplayer browser version of Pandemic (2nd edition rules) with the **On the Brink** roles and events.
+A multiplayer browser version of Pandemic (2nd edition rules) with the **On the Brink** and **In the Lab** roles, events and challenges.
 2–5 players, real-time, one shared board.
 
 ## Play online (GitHub Pages)
@@ -41,12 +41,12 @@ To test multiplayer locally, add hotseat players in the lobby, or open two brows
 
 ## What's included
 - Full base game with a twist: **Austin** replaces Atlanta (start city) and **Boston** replaces New York. Same colors and connections. 48 cities, outbreak chains, epidemics, eradication, 6-station limit, 7-card hand limit, every win/loss condition.
-- 13 roles: 7 base (2nd ed.) + 6 On the Brink (Archivist, Containment Specialist, Epidemiologist, Field Operative, Generalist, Troubleshooter).
-- 13 events: 5 base + 8 On the Brink. Event count is configurable (default 2 per player, as OtB suggests).
+- 17 roles: 7 base (2nd ed.) + 6 On the Brink (Archivist, Containment Specialist, Epidemiologist, Field Operative, Generalist, Troubleshooter) + 4 In the Lab (Virologist, Field Director, Local Liaison, Pilot). The Epidemiologist/Researcher/Local Liaison also gain their Lab-challenge abilities.
+- 16 events: 5 base + 8 On the Brink + 3 In the Lab (Improved Sanitation, Infection Zone Ban, Sequencing Breakthrough). Event count is configurable (default 2 per player, as OtB suggests).
 - Difficulty from Introductory (4 epidemics) up to Legendary (7).
 - **Challenges** (toggle in the lobby, can be combined):
-  - **Virulent Strain**: the 8 Virulent Strain epidemic cards (Chronic Effect, Complex Molecular Structure, Government Interference, Rate Effect, Slippery Slope, Hidden Pocket, Unacceptable Loss, Uncounted Populations).
-  - **Mutation**: a purple 5th disease (12 cubes), 2 Mutation infection cards and 3 Mutation event cards.
+  - **Virulent Strain**: 10 Virulent Strain epidemic cards — the 8 On the Brink ones (Chronic Effect, Complex Molecular Structure, Government Interference, Rate Effect, Slippery Slope, Hidden Pocket, Unacceptable Loss, Uncounted Populations) plus the 2 In the Lab add-ons (Highly Contagious, Resistant to Treatment).
+  - **Mutation**: a purple 5th disease (12 cubes), 2 Mutation infection cards and 3 Mutation event cards. Toggle **Worldwide Panic** for the harder In the Lab scenario (24 purple cubes, Mutation cards place 2 purple, extra purple seeded at setup, and the purple cure needs 2 cards from cities with purple cubes).
 - **Custom events** (lobby toggle, on by default, adds 2 cards to the deck):
   - **New Route**: connect 2 cities of the same color. Pawns can Drive/Ferry along it, but outbreaks do not spread along it.
   - **Border Closure**: remove up to 2 connections. No driving across them, and outbreaks stop there.

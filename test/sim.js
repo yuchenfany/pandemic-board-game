@@ -10,11 +10,12 @@ function checkInvariants(s) {
   s.colors.forEach(c => {
     const board = CITY_NAMES.reduce((t, city) => t + s.cubes[city][c], 0);
     const samples = s.players.reduce((t, p) => t + p.samples[c], 0);
-    assert.strictEqual(board + samples + s.supply[c] + s.boxed[c], c === 'purple' ? 12 : 24, `cube conservation ${c}`);
+    assert.strictEqual(board + samples + s.supply[c] + s.boxed[c], s.cubeMax[c], `cube conservation ${c}`);
     CITY_NAMES.forEach(city => assert(s.cubes[city][c] >= 0 && s.cubes[city][c] <= 3, `cube range ${city}`));
   });
   const cards = [...s.playerDeck, ...s.playerDiscard, ...s.removed.filter(c => !CITY_NAMES.includes(c)),
-    ...s.players.flatMap(p => p.hand), ...s.players.map(p => p.stored).filter(Boolean)];
+    ...s.players.flatMap(p => p.hand), ...s.players.map(p => p.stored).filter(Boolean),
+    ...(s.activeEvents || []).map(e => e.card)];
   assert.strictEqual(new Set(cards).size, cards.length, 'duplicate player card');
   const inf = [...s.infectionDeck, ...s.infectionDiscard, ...s.removed.filter(c => CITY_NAMES.includes(c)),
     ...(s.interrupt ? s.interrupt.cards : [])];

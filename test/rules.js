@@ -447,4 +447,183 @@ test('custom events are only in the deck when enabled', () => {
   assert(!all(off).some(c => c === 'E:newRoute' || c === 'E:borderClosure'));
 });
 
+// ---------------------------------------------------------------- In the Lab: roles
+
+test('pilot: flies up to 3, carries a passenger, cannot drive or build', () => {
+  let s = fresh(['pilot', 'medic'], [['Chicago']]);
+  // Even an adjacent city is reached by flying: the Pilot cannot Drive/Ferry.
+  assert.deepStrictEqual(E.getMoveOptions(s, 0, 0, 'Chicago').map(o => o.method), ['pilot']);
+  expectFail(() => E.apply(s, 0, { type: 'move', to: 'Chicago', method: 'drive' }), /not allowed/);
+  s = E.apply(s, 0, { type: 'move', to: 'Chicago', method: 'pilot' });
+  assert.strictEqual(s.players[0].location, 'Chicago');
+  expectFail(() => E.apply(s, 0, { type: 'build' }), /Pilot cannot build/);
+  // A city more than 3 connections away is out of range.
+  assert.strictEqual(E.getMoveOptions(s, 0, 0, 'Kinshasa').length, 0);
+  // Passenger in the same city rides along.
+  s.players[1].location = 'Chicago';
+  s = E.apply(s, 0, { type: 'move', to: 'Fremont', method: 'pilot', passenger: 1 });
+  assert.strictEqual(s.players[0].location, 'Fremont');
+  assert.strictEqual(s.players[1].location, 'Fremont');
+
+  // When another player moves the Pilot (Dispatcher), the Pilot moves normally.
+  s = fresh(['dispatcher', 'pilot']);
+  s.players[1].location = 'Austin';
+  s = E.apply(s, 0, { type: 'move', pawn: 1, to: 'Chicago', method: 'drive' });
+  assert.strictEqual(s.players[1].location, 'Chicago');
+});
+
+test('field director: treats a connected city and moves a teammate as a free action', () => {
+  let s = fresh(['fieldDirector', 'medic']);
+  put(s, 'Chicago', 'blue', 2); // Austin is connected to Chicago
+  s = E.apply(s, 0, { type: 'treat', color: 'blue', city: 'Chicago' });
+  assert.strictEqual(s.cubes['Chicago'].blue, 1);
+  assert.strictEqual(s.turn.actionsLeft, 3);
+  put(s, 'Tokyo', 'red', 1);
+  expectFail(() => E.apply(s, 0, { type: 'treat', color: 'red', city: 'Tokyo' }), /connected/);
+  // Free bonus move of a teammate in your city or a connected one, once per turn.
+  s.players[1].location = 'Chicago';
+  s = E.apply(s, 0, { type: 'fieldDirectorMove', pawn: 1, to: 'Toronto' });
+  assert.strictEqual(s.players[1].location, 'Toronto');
+  assert.strictEqual(s.turn.actionsLeft, 3, 'free, not an action');
+  expectFail(() => E.apply(s, 0, { type: 'fieldDirectorMove', pawn: 1, to: 'Boston' }), /Already used/);
+  // Cannot move the Pilot.
+  let s2 = fresh(['fieldDirector', 'pilot']);
+  s2.players[1].location = 'Chicago';
+  expectFail(() => E.apply(s2, 0, { type: 'fieldDirectorMove', pawn: 1, to: 'Toronto' }), /cannot move the Pilot/);
+});
+
+test('local liaison: gives a matching-color card to a same-color city', () => {
+  let s = fresh(['localLiaison', 'medic'], [['Chicago', 'Tokyo']]); // Austin is blue
+  s.players[1].location = 'Tokyo'; // red city
+  expectFail(() => E.apply(s, 0, { type: 'localLiaisonGive', to: 1, card: 'Chicago' }), /must be in a blue/);
+  expectFail(() => E.apply(s, 0, { type: 'localLiaisonGive', to: 1, card: 'Tokyo' }), /blue City card/);
+  s.players[1].location = 'London'; // blue city
+  s = E.apply(s, 0, { type: 'localLiaisonGive', to: 1, card: 'Chicago' });
+  assert(s.players[1].hand.includes('Chicago'));
+  assert.strictEqual(s.turn.actionsLeft, 3);
+  expectFail(() => E.apply(s, 0, { type: 'localLiaisonGive', to: 1, card: 'Tokyo' }), /Already used/);
+});
+
+test('virologist: removes a cube with a card; cures using pairs as substitutes', () => {
+  let s = fresh(['virologist', 'medic'], [['Paris']]);
+  put(s, 'Chicago', 'blue', 1);
+  s = E.apply(s, 0, { type: 'virologistRemove', card: 'Paris', city: 'Chicago' }); // Paris is blue
+  assert.strictEqual(s.cubes['Chicago'].blue, 0);
+  assert(!s.players[0].hand.includes('Paris'));
+  assert.strictEqual(s.turn.actionsLeft, 3);
+
+  // 3 red singles + a blue pair + a yellow pair = 5 toward the red cure.
+  s = fresh(['virologist', 'medic'], [['Tokyo', 'Seoul', 'Beijing', 'London', 'Boston', 'Lima', 'Mexico City']]);
+  s = E.apply(s, 0, { type: 'cure', color: 'red', cards: ['Tokyo', 'Seoul', 'Beijing'],
+    pairs: [['London', 'Boston'], ['Lima', 'Mexico City']] });
+  assert.notStrictEqual(s.cures.red, 'none', 'red is cured via pairs');
+  expectFail(() => E.apply(fresh(['virologist', 'medic'], [['Tokyo', 'Seoul', 'Beijing', 'London', 'Lima']]), 0,
+    { type: 'cure', color: 'red', cards: ['Tokyo', 'Seoul', 'Beijing'], pairs: [['London', 'Lima']] }), /same color/);
+});
+
+// ---------------------------------------------------------------- In the Lab: events
+
+test('event Improved Sanitation: treat removes an extra cube until your next turn', () => {
+  let s = fresh(['scientist', 'medic'], [['E:improvedSanitation']]);
+  put(s, 'Austin', 'blue', 3);
+  s = E.apply(s, 0, { type: 'playEvent', card: 'E:improvedSanitation' });
+  assert(s.activeEvents.some(e => e.key === 'improvedSanitation'));
+  assert(!s.playerDiscard.includes('E:improvedSanitation'), 'reminder is not yet in the discard pile');
+  s = E.apply(s, 0, { type: 'treat', color: 'blue' });
+  assert.strictEqual(s.cubes['Austin'].blue, 1, 'removed 2 instead of 1');
+  // Drive two full turns (2 players) back to player 0: the reminder then expires.
+  s.playerDeck.push('Nanjing', 'Wuhan', 'Osaka', 'Taipei', 'Manila', 'Beijing');
+  s = E.apply(s, 0, { type: 'endActions' });
+  s = E.apply(s, 0, { type: 'infect' });
+  s = E.apply(s, 1, { type: 'endActions' });
+  s = E.apply(s, 1, { type: 'infect' });
+  assert.strictEqual(s.current, 0);
+  assert(!s.activeEvents.some(e => e.key === 'improvedSanitation'), 'expired at owner\'s next turn');
+  assert(s.playerDiscard.includes('E:improvedSanitation'), 'now discarded');
+});
+
+test('event Infection Zone Ban: outbreaks occur but do not chain', () => {
+  let s = fresh(['scientist', 'medic'], [['E:infectionZoneBan']]);
+  s.cubes['Paris'].blue = 3; s.cubes['London'].blue = 3; s.supply.blue -= 6;
+  s = E.apply(s, 0, { type: 'playEvent', card: 'E:infectionZoneBan' });
+  s.infectionDeck.push('Paris');
+  s.turn.phase = 'infect'; s.travelBan = 1; // draw exactly Paris
+  s = E.apply(s, 0, { type: 'infect' });
+  assert.strictEqual(s.outbreaks, 1, 'Paris outbreaks; London chain is ignored');
+  assert.strictEqual(s.cubes['Madrid'].blue, 1, 'the first outbreak still spreads 1');
+  assert.strictEqual(s.cubes['London'].blue, 3, 'London stays at 3, no chain reaction');
+});
+
+test('event Sequencing Breakthrough: the next cure needs 1 fewer card', () => {
+  const blue = ['Austin', 'Chicago', 'Toronto', 'Boston'];
+  let s = fresh(['medic', 'scientist'], [['E:sequencingBreakthrough', ...blue]]);
+  s = E.apply(s, 0, { type: 'playEvent', card: 'E:sequencingBreakthrough' });
+  assert.strictEqual(E.cardsNeededForCure(s, s.players[0], 'blue', false), 4, 'medic 5 -> 4');
+  s = E.apply(s, 0, { type: 'cure', color: 'blue', cards: blue });
+  assert.notStrictEqual(s.cures.blue, 'none', 'blue is cured');
+  assert.strictEqual(s.activeEvents.length, 0, 'spent by the cure');
+  assert(s.playerDiscard.includes('E:sequencingBreakthrough'));
+});
+
+// ---------------------------------------------------------------- In the Lab: Virulent Strain add-on
+
+test('virulent: Highly Contagious doubles the first outbreak spread', () => {
+  let s = fresh(['scientist', 'medic'], [], { virulent: true });
+  s.virulent = 'blue'; s.vsEffects = ['highlyContagious'];
+  put(s, 'Paris', 'blue', 3);
+  s.infectionDeck.push('Paris'); s.turn.phase = 'infect'; s.travelBan = 1;
+  s = E.apply(s, 0, { type: 'infect' });
+  assert.strictEqual(s.outbreaks, 1);
+  assert.strictEqual(s.cubes['Madrid'].blue, 2, 'spreads 2, not 1');
+  assert.strictEqual(s.cubes['Marburg'].blue, 2);
+
+  let s2 = fresh(['scientist', 'medic'], [], { virulent: true });
+  s2.virulent = 'blue'; s2.vsEffects = ['highlyContagious'];
+  put(s2, 'Paris', 'blue', 3); put(s2, 'Madrid', 'blue', 2);
+  s2.infectionDeck.push('Paris'); s2.turn.phase = 'infect'; s2.travelBan = 1;
+  s2 = E.apply(s2, 0, { type: 'infect' });
+  assert.strictEqual(s2.cubes['Madrid'].blue, 3, 'a 2+ connected city is filled to 3');
+  assert(s2.outbreaks >= 2, 'and has a chain-reaction outbreak');
+});
+
+test('virulent: Resistant to Treatment makes treating the strain cost 2 actions', () => {
+  let s = fresh(['scientist', 'medic'], [], { virulent: true });
+  s.virulent = 'blue'; s.vsEffects = ['resistantToTreatment'];
+  put(s, 'Austin', 'blue', 2);
+  s = E.apply(s, 0, { type: 'treat', color: 'blue' });
+  assert.strictEqual(s.turn.actionsLeft, 2, 'treating cost 2 actions');
+  assert.strictEqual(s.cubes['Austin'].blue, 1);
+  s.turn.actionsLeft = 1;
+  expectFail(() => E.apply(s, 0, { type: 'treat', color: 'blue' }), /2 actions/);
+  s.turn.actionsLeft = 4; s.cures.blue = 'cured';
+  s = E.apply(s, 0, { type: 'treat', color: 'blue' });
+  assert.strictEqual(s.turn.actionsLeft, 3, 'once cured, treating is a normal 1-action remove-all');
+});
+
+// ---------------------------------------------------------------- Mutation: Worldwide Panic
+
+test('mutation Worldwide Panic: 24 purple, seeded cubes, 2-purple cards, cure needs 2', () => {
+  const s = E.createGame({ players: [{ name: 'A' }, { name: 'B' }], epidemics: 5, challenges: { mutation: true, worldwidePanic: true } });
+  assert.strictEqual(s.cubeMax.purple, 24);
+  assert.strictEqual(CITY_NAMES.reduce((t, c) => t + s.cubes[c].purple, 0), 6, '1+2+3 purple seeded during setup');
+  assert.strictEqual(s.supply.purple, 24 - 6);
+
+  let g = fresh(['scientist', 'medic'], [], { mutation: true, worldwidePanic: true });
+  g.infectionDiscard = [];
+  g.infectionDeck = g.infectionDeck.filter(c => c !== 'Lima');
+  g.infectionDeck.unshift('Lima'); // bottom
+  g.infectionDeck.push('MUTATION1'); // top
+  g.turn.phase = 'infect'; g.travelBan = 1;
+  g = E.apply(g, 0, { type: 'infect' });
+  assert.strictEqual(g.cubes['Lima'].purple, 2, 'a Mutation card places 2 purple');
+
+  let h = fresh(['scientist', 'medic'], [['Paris', 'Tokyo', 'Lagos', 'Delhi']], { mutation: true, worldwidePanic: true });
+  put(h, 'Delhi', 'purple', 1);
+  expectFail(() => E.apply(h, 0, { type: 'cure', color: 'purple', cards: ['Paris', 'Tokyo', 'Lagos', 'Delhi'] }), /least 2/);
+  put(h, 'Tokyo', 'purple', 1);
+  h.cures.blue = h.cures.yellow = h.cures.black = h.cures.red = 'cured';
+  h = E.apply(h, 0, { type: 'cure', color: 'purple', cards: ['Paris', 'Tokyo', 'Lagos', 'Delhi'] });
+  assert.strictEqual(h.cures.purple, 'cured');
+});
+
 console.log(`${passed} rule tests passed`);
