@@ -22,13 +22,14 @@
       this.code = code;
       this.seats = [];
       this.hostToken = null;
-      this.config = { epidemics: 5, eventsPerPlayer: 2, challenges: { lab: false, virulent: false, mutation: false, worldwidePanic: false }, excludedRoles: [], customEvents: true };
+      this.config = { mode: 'coop', epidemics: 5, eventsPerPlayer: 2, challenges: { lab: false, virulent: false, mutation: false, worldwidePanic: false }, excludedRoles: [], customEvents: true };
       this.game = null;
       this.chat = [];
       if (saved) Object.assign(this, saved, { code });
       this.config.challenges = this.config.challenges || { virulent: false, mutation: false };
       this.config.excludedRoles = this.config.excludedRoles || [];
       if (typeof this.config.customEvents !== 'boolean') this.config.customEvents = true;
+      if (!['coop', 'solo', 'team'].includes(this.config.mode)) this.config.mode = 'coop';
     }
 
     toJSON() {
@@ -121,6 +122,7 @@
 
     on_config(token, cfg) {
       if (this.game || token !== this.hostToken) return { error: 'Only the host can change settings' };
+      if (['coop', 'solo', 'team'].includes(cfg.mode)) this.config.mode = cfg.mode;
       const ep = Number(cfg.epidemics), ev = Number(cfg.eventsPerPlayer);
       if ([4, 5, 6, 7].includes(ep)) this.config.epidemics = ep;
       if ([0, 1, 2, 3].includes(ev)) this.config.eventsPerPlayer = ev;
@@ -140,6 +142,11 @@
       if (this.game) return { error: 'Already started' };
       // The Field Operative is not used in the Lab challenge; drop it to a random role.
       if (this.config.challenges.lab) this.seats.forEach(s => { if (s.role === 'fieldOperative') s.role = null; });
+      // The solo game sets aside a few roles; drop them to random if picked.
+      if (this.config.mode === 'solo') {
+        const soloOut = ['dispatcher', 'researcher', 'epidemiologist', 'localLiaison'];
+        this.seats.forEach(s => { if (soloOut.includes(s.role)) s.role = null; });
+      }
       this.game = Engine.createGame({
         players: this.seats.map(s => ({ name: s.name, role: s.role })),
         epidemics: this.config.epidemics,
@@ -147,6 +154,7 @@
         challenges: this.config.challenges,
         excludedRoles: this.config.excludedRoles,
         customEvents: this.config.customEvents,
+        mode: this.config.mode,
       });
     }
 

@@ -52,6 +52,7 @@ To test multiplayer locally, add hotseat players in the lobby, or open two brows
   - **New Route**: connect 2 cities of the same color. Pawns can Drive/Ferry along it, but outbreaks do not spread along it.
   - **Border Closure**: remove up to 2 connections. No driving across them, and outbreaks stop there.
   Both last for the rest of the game and show on the map (dashed gold = new route, red ✕ = closed).
+- **Solo game** (lobby Mode → Solo): play alone with help from the CDC. After you infect each turn, the CDC takes 1 action — move your pawn, reassign your role, exchange a card, draw a Player card (its own 7-card hand), or cure by discarding 5 same-color cards. Difficulty seeds 8/12/14/16 cards into the discard pile; Dispatcher/Researcher/Epidemiologist/Local Liaison are set aside.
 - **Random roles**: the host can exclude roles that Random may hand out. Players can still pick excluded roles themselves.
 - Up to 5 players, game log, team chat, reconnect.
 

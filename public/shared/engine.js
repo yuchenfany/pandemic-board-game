@@ -82,9 +82,11 @@
 
   // excludedRoles: roles a "Random" player can't be given (players may still pick them).
   // customEvents: also shuffle the custom events (New Route, Border Closure) into the deck.
-  function createGame({ players, epidemics = 5, eventCount, challenges = {}, excludedRoles = [], customEvents = false }) {
+  function createGame({ players, epidemics = 5, eventCount, challenges = {}, excludedRoles = [], customEvents = false, mode = 'coop' }) {
     const n = players.length;
-    if (n < 2 || n > 5) fail('Pandemic needs 2 to 5 players');
+    const solo = mode === 'solo';
+    if (solo) { if (n !== 1) fail('The solo game is for 1 player'); }
+    else if (n < 2 || n > 5) fail('Pandemic needs 2 to 5 players');
     if (epidemics < 4 || epidemics > 7) fail('Epidemics must be 4-7');
     const mutation = !!challenges.mutation, virulent = !!challenges.virulent;
     const worldwidePanic = mutation && !!challenges.worldwidePanic;
@@ -96,8 +98,10 @@
     if (new Set(chosen).size !== chosen.length) fail('Two players picked the same role');
     chosen.forEach(r => { if (!ROLES[r]) fail(`Unknown role ${r}`); });
     // The Field Operative is not used in the Lab challenge (its samples clash with lab samples).
-    const labExcluded = lab ? ['fieldOperative'] : [];
-    const freeRoles = shuffle(roleKeys.filter(r => !chosen.includes(r) && !excludedRoles.includes(r) && !labExcluded.includes(r)));
+    // The solo game also sets aside the Dispatcher, Researcher, Epidemiologist and Local Liaison.
+    const modeExcluded = (lab ? ['fieldOperative'] : [])
+      .concat(solo ? ['dispatcher', 'researcher', 'epidemiologist', 'localLiaison'] : []);
+    const freeRoles = shuffle(roleKeys.filter(r => !chosen.includes(r) && !excludedRoles.includes(r) && !modeExcluded.includes(r)));
     if (players.filter(p => !p.role).length > freeRoles.length) fail('Not enough roles left for the Random players (too many excluded)');
 
     const colors = mutation ? [...COLORS, 'purple'] : COLORS.slice();
@@ -131,6 +135,9 @@
       quietNight: false,
       travelBan: null, // Commercial Travel Ban lasts until this player's next turn begins
       rvdColor: null, // Rapid Vaccine Deployment window after a cure
+      solo, // solo game: 1 human player plus the CDC
+      cdc: null, // the CDC's face-up cards and state (solo only)
+      removedRoles: [], // roles taken out of the game by the CDC's Reassign action
       status: 'playing',
       result: null,
       log: [],
@@ -161,14 +168,31 @@
       samples: zeroCubes(colors), // Field Operative
     }));
 
-    const allEvents = Object.keys(EVENTS).filter(k => EVENTS[k].set !== 'custom');
-    const numEvents = Math.max(0, Math.min(allEvents.length, eventCount == null ? 2 * n : eventCount));
-    const events = shuffle(allEvents).slice(0, numEvents)
-      .concat(customEvents ? Object.keys(EVENTS).filter(k => EVENTS[k].set === 'custom') : []).map(k => 'E:' + k);
-    let deck = shuffle(CITY_NAMES.concat(events));
-
-    const handSize = HAND_SIZE[n];
-    s.players.forEach(p => { for (let i = 0; i < handSize; i++) p.hand.push(deck.pop()); });
+    let deck;
+    if (solo) {
+      // Solo: seed the Player Discard with difficulty cards, use 4 events (no Special Orders),
+      // deal the human 4 cards and the CDC its own set of 4.
+      const seedCount = { 4: 8, 5: 12, 6: 14, 7: 16 }[epidemics] || 12;
+      let cityDeck, seeds;
+      do { cityDeck = shuffle(CITY_NAMES); seeds = cityDeck.slice(0, seedCount); }
+      while (COLORS.some(col => seeds.filter(c => CITIES[c].color === col).length > 6));
+      s.playerDiscard.push(...seeds);
+      log(s, `Solo setup: ${seedCount} City cards set aside in the discard pile.`);
+      const soloEvents = shuffle(Object.keys(EVENTS).filter(k => EVENTS[k].set !== 'custom' && k !== 'specialOrders')).slice(0, 4)
+        .concat(customEvents ? Object.keys(EVENTS).filter(k => EVENTS[k].set === 'custom') : []).map(k => 'E:' + k);
+      deck = shuffle(cityDeck.slice(seedCount).concat(soloEvents));
+      for (let i = 0; i < 4; i++) s.players[0].hand.push(deck.pop());
+      s.cdc = { hand: [] };
+      for (let i = 0; i < 4; i++) s.cdc.hand.push(deck.pop());
+    } else {
+      const allEvents = Object.keys(EVENTS).filter(k => EVENTS[k].set !== 'custom');
+      const numEvents = Math.max(0, Math.min(allEvents.length, eventCount == null ? 2 * n : eventCount));
+      const events = shuffle(allEvents).slice(0, numEvents)
+        .concat(customEvents ? Object.keys(EVENTS).filter(k => EVENTS[k].set === 'custom') : []).map(k => 'E:' + k);
+      deck = shuffle(CITY_NAMES.concat(events));
+      const handSize = HAND_SIZE[n];
+      s.players.forEach(p => { for (let i = 0; i < handSize; i++) p.hand.push(deck.pop()); });
+    }
     if (mutation) deck = shuffle(deck.concat(Object.keys(MUTATION_EVENTS).map(k => 'ME:' + k)));
 
     const epidemicCards = virulent
@@ -493,6 +517,12 @@
     if (s.turn.phase !== 'actions' || s.turn.actionsLeft <= 0) fail('No actions left this turn');
   }
 
+  function requireCdc(s, pid) {
+    if (!s.solo || !s.cdc) fail('This is not a solo game');
+    if (pid !== 0) fail('Only you direct the CDC');
+    if (s.turn.phase !== 'cdc') fail('The CDC acts only after you infect cities');
+  }
+
   // The turn stays in the actions phase (so it can still be restarted) until the player ends it.
   function spendAction(s) {
     s.turn.actionsLeft--;
@@ -713,9 +743,41 @@
         if (s.status !== 'playing') return;
       }
     }
+    // Solo: after infecting, the CDC may take 1 action before the next turn begins.
+    if (s.solo) {
+      s.turn.phase = 'cdc';
+      log(s, 'The CDC may take 1 action (or pass).');
+      return;
+    }
     s.turnNo++;
     startTurn(s, (s.current + 1) % s.players.length);
     log(s, `--- ${s.players[s.current].name}'s turn ---`);
+  }
+
+  function endCdcPhase(s) {
+    if (s.status !== 'playing') return;
+    s.turnNo++;
+    startTurn(s, 0);
+    log(s, `--- ${s.players[0].name}'s turn ---`);
+  }
+
+  // The CDC draws 1 Player card (resolving an Epidemic in full, with no Resilient Population pause).
+  function cdcDraw(s) {
+    if (s.playerDeck.length < 1) { lose(s, 'Not enough player cards left to draw.'); return; }
+    const card = s.playerDeck.pop();
+    const cdcP = { name: 'The CDC' };
+    if (isEpidemic(card)) {
+      resolveEpidemic(s, card, cdcP);
+      if (s.status !== 'playing') return;
+      s.infectionDeck.push(...shuffle(s.infectionDiscard));
+      s.infectionDiscard = [];
+      log(s, 'Intensify: infection discards shuffled onto the infection deck.');
+    } else if (isMutationEvent(card)) {
+      resolveMutationEvent(s, card, cdcP);
+    } else {
+      s.cdc.hand.push(card);
+      log(s, `The CDC drew ${cardName(card)}.`);
+    }
   }
 
   // ---------------------------------------------------------------- events
@@ -937,6 +999,9 @@
     const over = overLimit(s);
     if (over.length && !['discard', 'playEvent', 'forecastOrder', 'labSequenceResolve'].includes(a.type)) {
       fail(`Waiting for ${over.map(i => s.players[i].name).join(', ')} to discard down to the hand limit`);
+    }
+    if (s.solo && s.cdc && s.cdc.hand.length > 7 && !['cdcDiscard', 'playEvent'].includes(a.type)) {
+      fail('The CDC is over its 7-card limit — discard CDC cards first');
     }
     if (a.type !== 'playEvent' && a.type !== 'discard') s.rvdColor = null;
 
@@ -1345,6 +1410,102 @@
         requireActionTurn(s, pid);
         log(s, `${p.name} passed an action.`);
         spendAction(s);
+        break;
+      // ---- Solo: the CDC's one action after the human infects.
+      case 'cdcMove': {
+        requireCdc(s, pid);
+        const human = s.players[0], from = human.location, to = validCity(a.to);
+        if (from === to) fail('Pick a different city');
+        if (a.method === 'drive') { if (!adj(s, from).includes(to)) fail('Those cities are not connected'); }
+        else if (a.method === 'direct') { if (!removeOne(s.cdc.hand, to)) fail('The CDC needs the destination city card'); s.playerDiscard.push(to); }
+        else if (a.method === 'charter') { if (!removeOne(s.cdc.hand, from)) fail('The CDC needs your current city card'); s.playerDiscard.push(from); }
+        else if (a.method === 'shuttle') { if (!(s.stations.includes(from) && s.stations.includes(to))) fail('Both cities need a research station'); }
+        else fail('Pick a movement method');
+        const blocked = leaveBlocked(s, 0);
+        if (blocked) fail(blocked);
+        movePawn(s, 0, to, a.method === 'drive' ? 'drive' : 'other');
+        log(s, `The CDC moved ${human.name} ${from} → ${to}.`);
+        endCdcPhase(s);
+        break;
+      }
+      case 'cdcReassign': {
+        requireCdc(s, pid);
+        const human = s.players[0];
+        if (!s.stations.includes(human.location)) fail('You must be at a research station');
+        const role = a.role;
+        if (!ROLES[role]) fail('Pick a role');
+        if (s.players.some(q => q.role === role) || s.removedRoles.includes(role)) fail('That role is not available');
+        if (['dispatcher', 'researcher', 'epidemiologist', 'localLiaison'].includes(role)) fail('That role is not used in the solo game');
+        if (s.challenges.lab && role === 'fieldOperative') fail('The Field Operative is not used in the Lab challenge');
+        if (human.stored) { s.removed.push(human.stored); human.stored = null; }
+        s.colors.forEach(c => { s.supply[c] += human.samples[c]; human.samples[c] = 0; });
+        s.removedRoles.push(human.role);
+        log(s, `The CDC reassigned you from ${ROLES[human.role].name} to ${ROLES[role].name}.`);
+        human.role = role;
+        onEnter(s, 0);
+        endCdcPhase(s);
+        break;
+      }
+      case 'cdcExchange': {
+        requireCdc(s, pid);
+        const human = s.players[0];
+        if (!s.stations.includes(human.location)) fail('You must be at a research station');
+        const cityColor = CITIES[human.location].color;
+        if (!isCity(a.giveCard) || !human.hand.includes(a.giveCard) || CITIES[a.giveCard].color !== cityColor) fail(`Give a ${cityColor} City card (matching your city)`);
+        if (!isCity(a.takeCard) || !s.cdc.hand.includes(a.takeCard)) fail('Pick a City card from the CDC');
+        removeOne(human.hand, a.giveCard); s.cdc.hand.push(a.giveCard);
+        removeOne(s.cdc.hand, a.takeCard); human.hand.push(a.takeCard);
+        log(s, `The CDC gave you ${a.takeCard} for ${a.giveCard}.`);
+        endCdcPhase(s);
+        break;
+      }
+      case 'cdcDraw': {
+        requireCdc(s, pid);
+        cdcDraw(s);
+        if (s.status !== 'playing') break;
+        s.turn.cdcDrew = true;
+        if (s.cdc.hand.length <= 7) endCdcPhase(s);
+        break;
+      }
+      case 'cdcDiscard': {
+        if (!s.solo || !s.cdc || s.turn.phase !== 'cdc') fail('Nothing for the CDC to discard');
+        if (s.cdc.hand.length <= 7) fail('The CDC is within its 7-card limit');
+        if (!removeOne(s.cdc.hand, a.card)) fail('The CDC does not have that card');
+        s.playerDiscard.push(a.card);
+        log(s, `The CDC discarded ${cardName(a.card)} (hand limit).`);
+        if (s.turn.cdcDrew && s.cdc.hand.length <= 7) endCdcPhase(s);
+        break;
+      }
+      case 'cdcCure': {
+        requireCdc(s, pid);
+        if (s.challenges.lab) fail('In the Lab challenge the CDC cannot discover cures directly');
+        const color = a.color;
+        if (!s.colors.includes(color)) fail('Pick a color');
+        if (s.cures[color] !== 'none') fail('That disease is already cured');
+        const cards = Array.isArray(a.cards) ? a.cards : [];
+        if (new Set(cards).size !== cards.length || cards.length !== 5) fail('Select exactly 5 CDC City cards');
+        cards.forEach(c => {
+          if (!isCity(c) || !s.cdc.hand.includes(c)) fail('The CDC must hold all 5 cards');
+          if (color !== 'purple' && CITIES[c].color !== color) fail(`All 5 cards must be ${color}`);
+        });
+        if (color === 'purple') {
+          const min = s.challenges.worldwidePanic ? 2 : 1;
+          if (cards.filter(c => s.cubes[c].purple > 0).length < min) fail(`At least ${min} of the cards must be cities with purple cubes`);
+        }
+        cards.forEach(c => { removeOne(s.cdc.hand, c); s.playerDiscard.push(c); });
+        s.cures[color] = 'cured';
+        expireEvents(s, (e) => e.key === 'sequencingBreakthrough');
+        log(s, `The CDC discovered a cure for ${color}!`);
+        s.players.forEach((q, qi) => { if (q.role === 'medic') onEnter(s, qi); });
+        checkEradication(s);
+        checkWin(s);
+        if (s.status === 'playing') endCdcPhase(s);
+        break;
+      }
+      case 'cdcSkip':
+        requireCdc(s, pid);
+        log(s, 'The CDC passed.');
+        endCdcPhase(s);
         break;
       case 'restartTurn': {
         if (pid !== s.current) fail("It's not your turn");

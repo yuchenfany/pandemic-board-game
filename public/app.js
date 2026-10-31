@@ -323,13 +323,17 @@ function renderLobby() {
     req('addLocal', { name });
   };
   localName.addEventListener('keydown', (e) => { if (e.key === 'Enter') addLocal(); });
-  const addLocalRow = r.seats.length < 5 ? h('div', null,
+  const mode = r.config.mode || 'coop';
+  const addLocalRow = (r.seats.length < 5 && mode !== 'solo') ? h('div', null,
     h('div', { class: 'row', style: { marginTop: '8px' } }, localName, h('button', { onclick: addLocal }, '+ Add player on this device')),
     h('p', { class: 'fine' }, 'Hotseat: extra players share your screen. It switches to whoever has to act.')) : null;
   const seatTabs = hotseat() ? h('div', { class: 'seat-tabs' }, h('span', { class: 'muted small' }, 'Choosing for:'),
     ui.mine.map(i => h('button', { class: i === pickFor ? 'primary' : '', onclick: () => { ui.lobbySeat = i; renderLobby(); } }, r.seats[i].name))) : null;
 
   const cfg = r.config;
+  const modeSel = h('select', { disabled: !isHost, onchange: (e) => req('config', { mode: e.target.value }) },
+    [['coop', 'Co-op (2–5 players)'], ['solo', 'Solo (you + the CDC)'], ['team', 'Team (4 or 6, rival teams)']].map(([v, l]) => h('option', { value: v }, l)));
+  modeSel.value = mode;
   const diffSel = h('select', { disabled: !isHost, onchange: (e) => req('config', { epidemics: Number(e.target.value) }) },
     DIFFICULTIES.map(d => h('option', { value: d.epidemics }, `${d.name} — ${d.epidemics} epidemics`)));
   diffSel.value = cfg.epidemics;
@@ -368,10 +372,12 @@ function renderLobby() {
     ...Object.entries(ROLES).map(([key, ro]) => {
       const owner = ownerOf(key);
       const labBanned = key === 'fieldOperative' && (cfg.challenges || {}).lab;
-      const mine = owner === pickFor, taken = (owner >= 0 && !mine) || labBanned;
+      const soloBanned = mode === 'solo' && ['dispatcher', 'researcher', 'epidemiologist', 'localLiaison'].includes(key);
+      const banned = labBanned || soloBanned;
+      const mine = owner === pickFor, taken = (owner >= 0 && !mine) || banned;
       return h('div', { class: 'role-card' + (mine ? ' mine' : '') + (taken ? ' taken' : ''), style: { '--rc': ro.color },
         onclick: () => !taken && req('pickRole', { role: mine ? null : key, seat: pickFor }) },
-      labBanned ? h('span', { class: 'who' }, 'not in Lab') : owner >= 0 ? h('span', { class: 'who' }, r.seats[owner].name) : null,
+      banned ? h('span', { class: 'who' }, labBanned ? 'not in Lab' : 'not in Solo') : owner >= 0 ? h('span', { class: 'who' }, r.seats[owner].name) : null,
       h('div', { class: 'rn' }, ro.name, ro.set === 'brink' ? h('span', { class: 'tag' }, 'Brink') : ro.set === 'lab' ? h('span', { class: 'tag' }, 'Lab') : null,
         excluded.includes(key) ? h('span', { class: 'tag', title: 'Never handed out at random' }, 'not random') : null),
       h('div', { class: 'rt' }, ro.text));
@@ -393,6 +399,9 @@ function renderLobby() {
         seats,
         addLocalRow,
         h('h2', { style: { marginTop: '18px' } }, 'Settings'),
+        h('label', null, 'Mode', modeSel),
+        mode === 'solo' ? h('p', { class: 'fine' }, 'Solo: 1 player with help from the CDC. Dispatcher, Researcher, Epidemiologist and Local Liaison are not used.') : null,
+        mode === 'team' ? h('p', { class: 'fine' }, 'Team: 4 or 6 players in rival 2-player teams. Goal cards are shown to everyone (true secrecy isn’t possible online).') : null,
         h('label', null, 'Difficulty', diffSel),
         h('label', null, 'Event cards', evSel),
         h('label', null, 'Challenges'), challenges,
@@ -402,8 +411,14 @@ function renderLobby() {
         h('input', { type: 'checkbox', checked: cfg.customEvents !== false, disabled: !isHost, onchange: (e) => req('config', { customEvents: e.target.checked }) }),
         'Custom events: New Route & Border Closure ', h('span', { class: 'tag' }, '+2 cards')),
         h('div', { class: 'row', style: { marginTop: '14px' } },
-          isHost ? h('button', { class: 'primary big', style: { flex: '1' }, disabled: r.seats.length < 2, onclick: () => req('start') },
-            r.seats.length < 2 ? 'Waiting for players…' : 'Start game') : h('span', { class: 'muted', style: { flex: '1' } }, 'Waiting for the host to start…'),
+          isHost ? (() => {
+            const nSeats = r.seats.length;
+            const canStart = mode === 'solo' ? nSeats === 1 : mode === 'team' ? (nSeats === 4 || nSeats === 6) : nSeats >= 2;
+            const why = mode === 'solo' ? (nSeats === 1 ? 'Start solo game' : 'Solo is 1 player — remove the others')
+              : mode === 'team' ? (canStart ? 'Start team game' : 'Team needs exactly 4 or 6 players')
+                : (canStart ? 'Start game' : 'Waiting for players…');
+            return h('button', { class: 'primary big', style: { flex: '1' }, disabled: !canStart, onclick: () => req('start') }, why);
+          })() : h('span', { class: 'muted', style: { flex: '1' } }, 'Waiting for the host to start…'),
           h('button', { onclick: () => {
             if (isHost && !confirm('Close this room for everyone?')) return;
             if (isHost) return leaveRoom();
@@ -1006,6 +1021,10 @@ function showHelp() {
     Object.values(PData.MUTATION_EVENTS).map(v => h('div', null, h('b', null, v.name), ' — ', v.text)),
     ui.game && ui.game.challenges && ui.game.challenges.worldwidePanic
       ? h('div', { class: 'muted' }, h('b', null, 'Worldwide Panic: '), PData.CHALLENGES.worldwidePanic.text) : null,
+    h('h4', null, 'Solo game'),
+    h('div', null, 'You play alone with help from the CDC. After you infect cities each turn, the CDC may take 1 action: move your pawn, reassign your role, exchange a City card with you, draw a Player card (into its own 7-card hand), or discover a cure by discarding 5 of its same-color cards (in the Lab challenge the CDC helps but does not cure). Dispatcher, Researcher, Epidemiologist and Local Liaison are not used.'),
+    h('h4', null, 'Team game'),
+    h('div', null, 'Four or six players form rival 2-player teams racing for prestige. Each team has 6 actions per turn (split between its players), its own research station, a Goal card (shown to everyone online) and earns award markers and Bonus cards. The team with the most prestige when the game ends wins.'),
     h('h4', null, 'Photo credits'),
     h('div', { class: 'muted small' }, 'City photos are from Wikimedia Commons (the lead image of each city\'s Wikipedia article), resized. ',
       'Free licences: CC0, public domain, CC BY, CC BY-SA or Free Art License.'),
@@ -1041,6 +1060,14 @@ function renderPlayers(g) {
         p.role === 'fieldOperative' && gcolors(g).some(c => p.samples[c]) ? h('span', { class: 'muted small' }, 'Samples: ',
           gcolors(g).map(c => p.samples[c] ? `${ICON[c]}×${p.samples[c]} ` : null)) : null)));
   });
+  if (g.solo && g.cdc) {
+    const over = g.cdc.hand.length > 7;
+    box.append(h('div', { class: 'player cdc' + (g.turn.phase === 'cdc' ? ' current' : '') },
+      h('div', { class: 'hdr' }, h('span', { class: 'pawnchip', style: { background: '#6b7a8f' } }),
+        h('span', { class: 'nm' }, 'CDC'), h('span', { class: 'loc' }, '🧬 assists you')),
+      h('div', { class: 'role' }, h('span', { class: over ? 'over' : '' }, `${g.cdc.hand.length}/7 cards`)),
+      h('div', { class: 'hand' }, g.cdc.hand.map(c => chip(c)))));
+  }
 }
 
 function renderHand(g) {
@@ -1136,7 +1163,8 @@ function renderTurnRow(g) {
       h('span', { class: 'arrow' }, '▶'),
       h('span', { class: 'step' + (ph === 'draw' || ph === 'epidemic' ? ' on' : '') }, ph === 'epidemic' ? 'Epidemic!' : 'Draw 2'),
       h('span', { class: 'arrow' }, '▶'),
-      h('span', { class: 'step' + (ph === 'infect' ? ' on' : '') }, `Infect ${n}`)));
+      h('span', { class: 'step' + (ph === 'infect' ? ' on' : '') }, `Infect ${n}`),
+      g.solo ? [h('span', { class: 'arrow' }, '▶'), h('span', { class: 'step' + (ph === 'cdc' ? ' on' : '') }, 'CDC')] : null));
   if (g.status !== 'playing') return;
   if (g.current !== ui.you) {
     if (isMine(g.current)) bar.append(h('button', { class: 'primary', onclick: () => switchSeat(g.current) }, `Switch to ${cur.name}`));
@@ -1152,6 +1180,7 @@ function renderTurnRow(g) {
   if (ph === 'draw') add(btn('🂠', 'Draw 2 player cards', () => send({ type: 'draw' }), { class: 'primary' }));
   if (ph === 'epidemic') add(btn('☣', 'Continue: Intensify', () => send({ type: 'continue' }), { class: 'primary' }));
   if (ph === 'infect') add(btn('🦠', n ? `Infect ${n} cit${n === 1 ? 'y' : 'ies'}` : 'Skip infection (Quiet Night)', () => send({ type: 'infect' }), { class: 'primary' }));
+  if (ph === 'cdc') { cdcActionsRow(g, add, btn); return; }
   if (ph !== 'actions') return;
 
   const here = me.location;
@@ -1539,6 +1568,82 @@ function labProcessToCard(g, from) {
   if (!open.length) return toast('No characterized research line to receive cubes', 'info');
   if (open.length === 1) return send({ type: 'labProcess', from, to: 'card', line: open[0] });
   openChoice('Onto which research line?', open.map(i => ({ label: `Line ${i + 1} (${g.lab.lines[i].color})`, onClick: () => send({ type: 'labProcess', from, to: 'card', line: i }) })));
+}
+
+// ------------------------------------------------------------ solo (CDC)
+
+function cdcActionsRow(g, add, btn) {
+  const human = g.players[0];
+  const cdc = g.cdc;
+  if (cdc.hand.length > 7) {
+    add(h('span', { class: 'whose' }, `CDC over limit (${cdc.hand.length}/7) — discard:`));
+    cdc.hand.forEach(c => add(btn('🗑', Engine.cardName(c), () => send({ type: 'cdcDiscard', card: c }), { act: false, class: 'ghost' })));
+    return;
+  }
+  const atStation = g.stations.includes(human.location);
+  add(h('span', { class: 'whose' }, h('span', { class: 'pawnchip', style: { background: '#6b7a8f' } }), 'CDC: 1 action'));
+  add(btn('📡', 'Move you', () => cdcMoveDialog(g), { act: false }));
+  add(btn('🂠', 'CDC draws', () => send({ type: 'cdcDraw' }), { act: false, disabled: g.playerDeckCount < 1 }));
+  add(btn('🔄', 'Reassign role', () => cdcReassignDialog(g), { act: false, disabled: !atStation, title: atStation ? 'Swap your role for an available one' : 'You must be at a research station' }));
+  add(btn('🔁', 'Exchange data', () => cdcExchangeDialog(g), { act: false, disabled: !atStation, title: atStation ? 'Swap a city card with the CDC' : 'You must be at a research station' }));
+  if (!g.challenges.lab) {
+    const colors = gcolors(g).filter(col => g.cures[col] === 'none'
+      && cdc.hand.filter(c => Engine.isCity(c) && (col === 'purple' || CITIES[c].color === col)).length >= 5
+      && (col !== 'purple' || cdc.hand.some(c => Engine.isCity(c) && g.cubes[c].purple > 0)));
+    add(btn('🧪', 'CDC cure', () => cdcCureDialog(g, colors), { act: false, disabled: !colors.length, title: 'The CDC cures by discarding 5 of its same-color cards' }));
+  }
+  add(h('span', { class: 'spacer' }), btn('⏭', 'CDC passes', () => send({ type: 'cdcSkip' }), { act: false, class: 'primary' }));
+}
+
+function cdcMoveDialog(g) {
+  const from = g.players[0].location, cdc = g.cdc;
+  openForm('CDC: move your pawn', 'Pick a destination; the CDC spends its own cards for flights.',
+    [{ name: 'to', label: 'Destination', type: 'select', options: CITY_NAMES.filter(c => c !== from).map(c => [c, c]) }],
+    ({ to }) => {
+      const methods = [];
+      if (Engine.adj(g, from).includes(to)) methods.push(['drive', '🚗 Drive / Ferry']);
+      if (cdc.hand.includes(to)) methods.push(['direct', `✈️ Direct Flight (CDC discards ${to})`]);
+      if (cdc.hand.includes(from)) methods.push(['charter', `🛩 Charter Flight (CDC discards ${from})`]);
+      if (g.stations.includes(from) && g.stations.includes(to)) methods.push(['shuttle', '🏥 Shuttle Flight']);
+      if (!methods.length) return toast(`The CDC can't move you to ${to}`, 'info');
+      if (methods.length === 1) return send({ type: 'cdcMove', to, method: methods[0][0] });
+      openChoice(`Move to ${to}`, methods.map(([m, l]) => ({ label: l, onClick: () => send({ type: 'cdcMove', to, method: m }) })));
+    });
+}
+
+function cdcReassignDialog(g) {
+  const avail = Object.entries(ROLES).filter(([k]) => !g.players.some(p => p.role === k) && !(g.removedRoles || []).includes(k)
+    && !['dispatcher', 'researcher', 'epidemiologist', 'localLiaison'].includes(k) && !(g.challenges.lab && k === 'fieldOperative'));
+  if (!avail.length) return toast('No roles available to reassign', 'info');
+  openForm('CDC: reassign your role', 'Swap your role for an available one. The old role leaves the game.',
+    [{ name: 'role', label: 'New role', type: 'select', options: avail.map(([k, ro]) => [k, ro.name]) }],
+    ({ role }) => send({ type: 'cdcReassign', role }));
+}
+
+function cdcExchangeDialog(g) {
+  const me = g.players[0], col = CITIES[me.location].color;
+  const give = me.hand.filter(c => Engine.isCity(c) && CITIES[c].color === col);
+  const take = g.cdc.hand.filter(Engine.isCity);
+  if (!give.length) return toast(`You have no ${col} City card to give`, 'info');
+  if (!take.length) return toast('The CDC has no City cards', 'info');
+  openForm('CDC: exchange data', `Give a ${col} card (matching your city); take a CDC City card.`,
+    [{ name: 'giveCard', label: 'Give', type: 'select', options: give.map(c => [c, c]) },
+      { name: 'takeCard', label: 'Take', type: 'select', options: take.map(c => [c, c]) }],
+    (v) => send({ type: 'cdcExchange', giveCard: v.giveCard, takeCard: v.takeCard }));
+}
+
+function cdcCureDialog(g, colors) {
+  const pickC = (color) => {
+    const cards = g.cdc.hand.filter(c => Engine.isCity(c) && (color === 'purple' || CITIES[c].color === color))
+      .sort((a, b) => (color === 'purple' ? g.cubes[b].purple - g.cubes[a].purple : 0));
+    const boxes = cards.map((c, i) => ({ c, box: h('input', { type: 'checkbox', checked: i < 5 }) }));
+    openModal(`🧪 CDC cure: ${color}`, h('div', null,
+      h('p', { class: 'muted' }, `Select 5 ${color === 'purple' ? 'City cards (at least 1 from a purple-cube city)' : color + ' cards'} from the CDC.`),
+      boxes.map(({ c, box }) => h('label', { class: 'check' }, box, chip(c), color === 'purple' && g.cubes[c].purple ? ` 🟣×${g.cubes[c].purple}` : ''))),
+    [cancelBtn(), h('button', { class: 'primary', onclick: () => { closeModal(); send({ type: 'cdcCure', color, cards: boxes.filter(b => b.box.checked).map(b => b.c) }); } }, 'Discover cure')]);
+  };
+  if (colors.length === 1) pickC(colors[0]);
+  else openChoice('Which disease?', colors.map(c => ({ label: `${ICON[c]} ${c}`, onClick: () => pickC(c) })));
 }
 
 // ------------------------------------------------------------ events

@@ -383,3 +383,7 @@ details.exclude summary { cursor: pointer; color: var(--muted); font-size: 13px;
 .lab-dish .row button, .lab-line .row button { font-size: 12px; padding: 3px 7px; }
 .lab-resolve { border: 1px solid var(--gold); border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; background: rgba(230,185,74,.08); }
 .check.challenge.sub + p { margin-top: 2px; }
+
+/* Solo: the CDC's card box */
+.player.cdc { border-style: dashed; opacity: .96; }
+.player.cdc .pawnchip { border-radius: 3px; }

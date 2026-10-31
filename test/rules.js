@@ -697,4 +697,76 @@ test('lab: Treat Disease can keep a cube as a sample; Field Operative is exclude
   }
 });
 
+// ---------------------------------------------------------------- Solo game
+
+test('solo: setup deals the human and CDC 4 cards and seeds the discard', () => {
+  const s = E.createGame({ players: [{ name: 'Solo', role: 'scientist' }], epidemics: 5, mode: 'solo' });
+  assert.strictEqual(s.players.length, 1);
+  assert(s.solo && s.cdc);
+  assert.strictEqual(s.players[0].hand.length, 4);
+  assert.strictEqual(s.cdc.hand.length, 4);
+  assert.strictEqual(s.playerDiscard.filter(E.isCity).length, 12, 'Standard seeds 12 cards');
+  for (let i = 0; i < 15; i++) {
+    const g = E.createGame({ players: [{ name: 'A' }], epidemics: 5, mode: 'solo' });
+    assert(!['dispatcher', 'researcher', 'epidemiologist', 'localLiaison'].includes(g.players[0].role), 'excluded solo role dealt');
+  }
+  expectFail(() => E.createGame({ players: [{ name: 'A' }, { name: 'B' }], epidemics: 5, mode: 'solo' }), /1 player/);
+});
+
+test('solo: the CDC phase follows the infect step and takes one action', () => {
+  let s = E.createGame({ players: [{ name: 'Solo', role: 'scientist' }], epidemics: 5, mode: 'solo' });
+  s.playerDeck.push('Nanjing', 'Wuhan'); // safe draws
+  s = E.apply(s, 0, { type: 'endActions' });
+  assert.strictEqual(s.turn.phase, 'infect');
+  s = E.apply(s, 0, { type: 'infect' });
+  assert.strictEqual(s.turn.phase, 'cdc', 'CDC phase after infecting');
+  const t = s.turnNo;
+  s = E.apply(s, 0, { type: 'cdcSkip' });
+  assert.strictEqual(s.turn.phase, 'actions');
+  assert.strictEqual(s.turnNo, t + 1, 'a new human turn begins');
+});
+
+test('solo: CDC Move / Draw / Exchange / Reassign / Cure', () => {
+  const solo = (role) => { const g = E.createGame({ players: [{ name: 'S', role }], epidemics: 5, mode: 'solo' }); g.turn.phase = 'cdc'; return g; };
+  let s = solo('scientist');
+  s = E.apply(s, 0, { type: 'cdcMove', to: 'Chicago', method: 'drive' });
+  assert.strictEqual(s.players[0].location, 'Chicago');
+  assert.strictEqual(s.turn.phase, 'actions');
+
+  s = solo('medic'); s.playerDeck.push('Lima');
+  const n = s.cdc.hand.length;
+  s = E.apply(s, 0, { type: 'cdcDraw' });
+  assert.strictEqual(s.cdc.hand.length, n + 1);
+
+  s = solo('medic');
+  s.players[0].hand = ['Chicago', 'Tokyo']; s.cdc.hand = ['Paris', 'Lima']; // Austin is blue
+  s = E.apply(s, 0, { type: 'cdcExchange', giveCard: 'Chicago', takeCard: 'Paris' });
+  assert(s.players[0].hand.includes('Paris') && !s.players[0].hand.includes('Chicago'));
+  assert(s.cdc.hand.includes('Chicago'));
+
+  s = solo('medic');
+  s = E.apply(s, 0, { type: 'cdcReassign', role: 'scientist' });
+  assert.strictEqual(s.players[0].role, 'scientist');
+  assert(s.removedRoles.includes('medic'));
+
+  s = solo('medic');
+  s.cdc.hand = ['Tokyo', 'Seoul', 'Beijing', 'Osaka', 'Taipei'];
+  s = E.apply(s, 0, { type: 'cdcCure', color: 'red', cards: ['Tokyo', 'Seoul', 'Beijing', 'Osaka', 'Taipei'] });
+  assert.notStrictEqual(s.cures.red, 'none');
+});
+
+test('solo: the CDC must discard down to 7 after drawing', () => {
+  let s = E.createGame({ players: [{ name: 'S', role: 'medic' }], epidemics: 5, mode: 'solo' });
+  s.turn.phase = 'cdc';
+  s.cdc.hand = ['Chicago', 'Toronto', 'Boston', 'Washington', 'London', 'Madrid', 'Paris'];
+  s.playerDeck.push('Lima');
+  s = E.apply(s, 0, { type: 'cdcDraw' });
+  assert.strictEqual(s.cdc.hand.length, 8);
+  assert.strictEqual(s.turn.phase, 'cdc', 'phase waits for a discard');
+  expectFail(() => E.apply(s, 0, { type: 'cdcSkip' }), /over its 7-card limit/);
+  s = E.apply(s, 0, { type: 'cdcDiscard', card: 'Lima' });
+  assert.strictEqual(s.cdc.hand.length, 7);
+  assert.strictEqual(s.turn.phase, 'actions', 'phase ends once back to 7');
+});
+
 console.log(`${passed} rule tests passed`);
