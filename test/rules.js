@@ -634,13 +634,13 @@ function labLine(seqId) {
 
 test('lab: characterize, process samples, test, then discover a cure', () => {
   let s = fresh(['scientist', 'medic'], [['Tokyo', 'Seoul', 'Beijing', 'Osaka', 'Taipei']], { lab: true });
-  s.lab.lines[0] = labLine('S10'); // red vial, 3 gray spots
+  s.lab.lines[0] = labLine('S9'); // red vial, 4 red spots
   s = E.apply(s, 0, { type: 'labCharacterize', line: 0, card: 'Tokyo' });
   assert.strictEqual(s.lab.lines[0].color, 'red');
   assert.strictEqual(s.turn.actionsLeft, 3, 'characterize costs an action');
-  s.lab.dishes.centrifuge.red = 3; s.supply.red -= 3;
+  s.lab.dishes.centrifuge.red = 4; s.supply.red -= 4;
   s = E.apply(s, 0, { type: 'labProcess', from: 'centrifuge', to: 'card', line: 0 });
-  assert(s.lab.lines[0].filled.every(x => x === 'red'), '3 red cubes fill the 3 gray spots');
+  assert(s.lab.lines[0].filled.every(x => x === 'red'), '4 red cubes fill the 4 red spots');
   expectFail(() => E.apply(s, 0, { type: 'cure', color: 'red', cards: ['Beijing', 'Osaka'] }), /not complete/);
   put(s, 'Osaka', 'red', 1);
   s = E.apply(s, 0, { type: 'labTest', line: 0, card: 'Seoul', city: 'Osaka' });

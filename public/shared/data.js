@@ -418,25 +418,27 @@
     intensifies: { name: 'The Mutation Intensifies!', text: 'Place 1 purple cube on each city with exactly 2 purple cubes.' },
   };
 
-  // Lab challenge Sequence cards. Each shows the vial symbols it can be characterized as
-  // (which cure colors are allowed) and a row of spots to fill with cubes: 'cure' is a gray
-  // spot (filled by the cure color), a color name is a spot filled by a cube of that color.
-  // Exact card art isn't reproducible from the rulebook, so this is a representative set.
+  // Lab challenge Sequence cards (the real 14). Each shows the vial symbols it can be
+  // characterized as (which cure colors are allowed) and a row of spots to fill with cubes,
+  // 1 cube per spot: 'cure' is a gray spot (filled by a cube of the cure color), a color
+  // name is a spot filled by a cube of that color. The 4 "mutation" cards (S11–S14) show a
+  // vial for every colour, so they are the only cards that can characterize the purple disease.
+  const ALL_VIALS = ['blue', 'yellow', 'black', 'red', 'purple'];
   const SEQUENCES = [
-    { id: 'S1', vials: ['blue', 'yellow'], spots: ['cure', 'cure', 'black'] },
-    { id: 'S2', vials: ['black', 'red'], spots: ['cure', 'cure', 'blue'] },
-    { id: 'S3', vials: ['blue', 'black'], spots: ['cure', 'cure', 'red'] },
-    { id: 'S4', vials: ['yellow', 'red'], spots: ['cure', 'cure', 'blue'] },
-    { id: 'S5', vials: ['blue', 'red'], spots: ['cure', 'cure', 'yellow'] },
-    { id: 'S6', vials: ['yellow', 'black'], spots: ['cure', 'cure', 'red'] },
-    { id: 'S7', vials: ['blue'], spots: ['cure', 'cure', 'cure'] },
-    { id: 'S8', vials: ['yellow'], spots: ['cure', 'cure', 'cure'] },
-    { id: 'S9', vials: ['black'], spots: ['cure', 'cure', 'cure'] },
-    { id: 'S10', vials: ['red'], spots: ['cure', 'cure', 'cure'] },
-    { id: 'S11', vials: ['blue', 'yellow', 'black', 'red'], spots: ['cure', 'cure', 'cure'] },
-    { id: 'S12', vials: ['blue', 'yellow'], spots: ['cure', 'red', 'yellow'] },
-    { id: 'S13', vials: ['black', 'red'], spots: ['cure', 'blue', 'black'] },
-    { id: 'S14', vials: ['blue', 'yellow', 'black', 'red'], spots: ['cure', 'cure', 'red'] },
+    { id: 'S1', vials: ['red', 'yellow'], spots: ['red', 'red', 'red', 'yellow', 'cure', 'cure'] },
+    { id: 'S2', vials: ['black', 'yellow'], spots: ['black', 'black', 'black', 'yellow', 'cure', 'cure'] },
+    { id: 'S3', vials: ['blue', 'black'], spots: ['blue', 'blue', 'blue', 'black', 'cure', 'cure'] },
+    { id: 'S4', vials: ['yellow', 'blue'], spots: ['yellow', 'yellow', 'yellow', 'blue', 'cure', 'cure'] },
+    { id: 'S5', vials: ['red', 'blue'], spots: ['red', 'red', 'red', 'blue', 'cure', 'cure'] },
+    { id: 'S6', vials: ['black', 'red'], spots: ['black', 'black', 'black', 'red', 'cure', 'cure'] },
+    { id: 'S7', vials: ['blue'], spots: ['blue', 'blue', 'blue', 'blue'] },
+    { id: 'S8', vials: ['yellow'], spots: ['yellow', 'yellow', 'yellow', 'yellow'] },
+    { id: 'S9', vials: ['red'], spots: ['red', 'red', 'red', 'red'] },
+    { id: 'S10', vials: ['black'], spots: ['black', 'black', 'black', 'black'] },
+    { id: 'S11', vials: ALL_VIALS, spots: ['yellow', 'yellow', 'yellow', 'yellow', 'red', 'blue', 'cure', 'cure'] },
+    { id: 'S12', vials: ALL_VIALS, spots: ['black', 'black', 'black', 'black', 'yellow', 'red', 'cure', 'cure'] },
+    { id: 'S13', vials: ALL_VIALS, spots: ['red', 'red', 'red', 'red', 'blue', 'black', 'cure', 'cure'] },
+    { id: 'S14', vials: ALL_VIALS, spots: ['blue', 'blue', 'blue', 'blue', 'black', 'yellow', 'cure', 'cure'] },
   ];
   const SEQ_BY_ID = Object.fromEntries(SEQUENCES.map(c => [c.id, c]));
 

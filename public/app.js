@@ -1063,9 +1063,9 @@ function showHelp() {
     h('div', null, 'Cures must be built in the lab (open with the 🧪 Lab button) before they can be discovered. All lab actions are taken at a research station; each costs an action unless a role or the build bonus makes it free.'),
     h('ul', null,
       h('li', null, h('b', null, 'Treat Disease'), ' may keep 1 removed cube as a sample (in a sample dish).'),
-      h('li', null, h('b', null, 'Characterize'), ' — play a City card whose color is a vial symbol on a research line’s Sequence card; this sets the line’s cure color.'),
+      h('li', null, h('b', null, 'Characterize'), ' — play a City card whose color is a vial symbol on a research line’s Sequence card; this sets the line’s cure color. To characterize the purple (Mutation) disease, play a card for a city that has a purple cube.'),
       h('li', null, h('b', null, 'Process a Sample'), ' — move all cubes from a dish: a sample dish feeds the centrifuge (keep 1 color) or separator (1 of each color); the centrifuge/separator feed the growth dish (cubes double) or a Sequence card; gray spots take cure-color cubes, and leftover cubes return to the supply.'),
-      h('li', null, h('b', null, 'Test a Cure'), ' — once a line has a cube, play a cure-color City card and remove 1 cube of that color from a city.'),
+      h('li', null, h('b', null, 'Test a Cure'), ' — once a line has a cube, play a cure-color City card and remove 1 cube of that color from a city. For purple, any City card works (in Worldwide Panic it must be a city with a purple cube).'),
       h('li', null, h('b', null, 'Sequence a Disease'), ' — draw a Sequence card, then place it (needs a 2nd station), swap it in, or discard it.'),
       h('li', null, h('b', null, 'Discover a Cure'), ' — when a line is characterized, fully filled and tested, cure it with 3 cards (Scientist 2) of its color.')),
     h('h4', null, 'Challenge: Virulent Strain'),
@@ -1373,7 +1373,9 @@ function cureDialog(g, colors) {
     const boxes = cards.map((c, i) => ({ c, box: h('input', { type: 'checkbox', checked: i < need }) }));
     const sampleBox = canSample ? h('input', { type: 'checkbox' }) : null;
     const body = h('div', null,
-      h('p', { class: 'muted' }, `Select ${need} ${color === 'purple' ? 'City cards of any color — at least 1 from a city with purple cubes' : 'cards'}` +
+      h('p', { class: 'muted' }, `Select ${need} ${color === 'purple'
+        ? (g.challenges.lab ? 'City cards of any color' : `City cards of any color — at least ${g.challenges.worldwidePanic ? 2 : 1} from a city with purple cubes`)
+        : 'cards'}` +
         (canSample ? ` (or ${Engine.cardsNeededForCure(g, me, color, true)} cards + 3 samples)` : '') + '.'),
       boxes.map(({ c, box }) => h('label', { class: 'check' }, box, chip(c), color === 'purple' && g.cubes[c].purple ? ` 🟣×${g.cubes[c].purple}` : '')),
       sampleBox ? h('label', { class: 'check' }, sampleBox, 'Use 3 samples from my role card') : null);
@@ -1571,8 +1573,14 @@ function renderLabBody() {
       // Per-line actions.
       const acts = [];
       if (!line.color) {
-        const chCards = me.hand.filter(c => Engine.isCity(c) && seq.vials.includes(CITIES[c].color) && g.cures[CITIES[c].color] === 'none');
-        acts.push(h('button', { disabled: !can('characterize') || !chCards.length, onclick: () => labCharacterizeDialog(g, li, chCards) }, 'Characterize'));
+        const chOpts = [];
+        me.hand.filter(Engine.isCity).forEach(c => {
+          const own = CITIES[c].color;
+          if (seq.vials.includes(own) && g.cures[own] === 'none') chOpts.push({ card: c, color: own });
+          // Purple (Mutation) can only be characterized from a city that has a purple cube.
+          if (seq.vials.includes('purple') && gcolors(g).includes('purple') && g.cures.purple === 'none' && g.cubes[c].purple > 0) chOpts.push({ card: c, color: 'purple' });
+        });
+        acts.push(h('button', { disabled: !can('characterize') || !chOpts.length, onclick: () => labCharacterizeDialog(g, li, chOpts) }, 'Characterize'));
       }
       if (line.color && !line.tested && line.filled.some(x => x != null)) {
         acts.push(h('button', { disabled: !can('test'), onclick: () => labTestDialog(g, li) }, 'Test cure'));
@@ -1618,20 +1626,27 @@ function seqSpotsPreview(seq) {
     h('span', { class: 'spot', style: { background: spot === 'cure' ? '#6b7280' : COLOR_HEX[spot] }, title: spot === 'cure' ? 'gray (cure color)' : spot })));
 }
 
-function labCharacterizeDialog(g, li, cards) {
-  openChoice('Characterize — play a City card', cards.map(c => ({
-    label: `${c} → characterize as ${CITIES[c].color}`, onClick: () => send({ type: 'labCharacterize', line: li, card: c }),
+function labCharacterizeDialog(g, li, opts) {
+  openChoice('Characterize — play a City card', opts.map(o => ({
+    label: o.color === 'purple' ? `${o.card} (has a purple cube) → characterize as purple` : `${o.card} → characterize as ${o.color}`,
+    onClick: () => send({ type: 'labCharacterize', line: li, card: o.card, color: o.color }),
   })));
 }
 
 function labTestDialog(g, li) {
   const me = g.players[ui.you];
   const color = g.lab.lines[li].color;
-  const cards = me.hand.filter(c => Engine.isCity(c) && CITIES[c].color === color);
+  const wwpPurple = color === 'purple' && g.challenges.worldwidePanic;
+  const cards = color === 'purple'
+    ? me.hand.filter(c => Engine.isCity(c) && (!wwpPurple || g.cubes[c].purple > 0))
+    : me.hand.filter(c => Engine.isCity(c) && CITIES[c].color === color);
   const cities = CITY_NAMES.filter(x => g.cubes[x][color] > 0);
-  if (!cards.length) return toast(`You need a ${color} City card to test`, 'info');
+  if (!cards.length) return toast(wwpPurple ? 'You need a City card for a city with a purple cube to test' : color === 'purple' ? 'You need a City card to test' : `You need a ${color} City card to test`, 'info');
   if (!cities.length) return toast(`No ${color} cube on the board to remove`, 'info');
-  openForm('Test the cure', `Play a ${color} City card and remove 1 ${color} cube from a city.`,
+  const desc = color === 'purple'
+    ? `${wwpPurple ? 'Play a City card for a city with a purple cube' : 'Play any City card'}, and remove 1 purple cube from a city.`
+    : `Play a ${color} City card and remove 1 ${color} cube from a city.`;
+  openForm('Test the cure', desc,
     [{ name: 'card', label: 'City card', type: 'select', options: cards.map(c => [c, c]) },
       { name: 'city', label: 'Remove a cube from', type: 'select', options: cities.map(c => [c, `${c} (${g.cubes[c][color]})`]) }],
     (v) => send({ type: 'labTest', line: li, card: v.card, city: v.city }));
@@ -1672,7 +1687,7 @@ function cdcActionsRow(g, add, btn) {
   {
     const lab = g.challenges.lab;
     const need = lab ? 3 : 5;
-    const lineDone = (col) => col === 'purple' || (g.lab && g.lab.lines.some(l => l.color === col && Engine.labLineComplete(g, l)));
+    const lineDone = (col) => g.lab && g.lab.lines.some(l => l.color === col && Engine.labLineComplete(g, l));
     const colors = gcolors(g).filter(col => g.cures[col] === 'none'
       && cdc.hand.filter(c => Engine.isCity(c) && (col === 'purple' || CITIES[c].color === col)).length >= need
       && (col !== 'purple' || cdc.hand.some(c => Engine.isCity(c) && g.cubes[c].purple > 0))

@@ -1244,9 +1244,9 @@
         if (!s.colors.includes(color)) fail('Pick a color');
         if (!usableStation(s, here, pid)) fail(s.team ? 'You must be at a station your team can use' : 'You must be at a research station');
         if (s.cures[color] !== 'none') fail('That disease is already cured');
-        // Lab: a standard disease can only be cured once its research line is complete.
+        // Lab: a disease (purple included) can only be cured once its research line is complete.
         let labLine = -1;
-        if (s.challenges.lab && color !== 'purple') {
+        if (s.challenges.lab) {
           labLine = s.lab.lines.findIndex(l => l.color === color && lineComplete(s, l));
           if (labLine < 0) fail('The lab research line for this disease is not complete yet (characterize it, fill its Sequence card, and test the cure)');
         }
@@ -1273,7 +1273,9 @@
         });
         const what = color === 'purple' ? 'City cards (any colors)' : `${color} City cards`;
         if (cards.length + pairs.length !== need) fail(`Select cards worth exactly ${need} ${what}`);
-        if (color === 'purple') {
+        // In the Lab challenge the purple-cube requirement moves to characterize/test, so the
+        // discarded cards can be any colour and need not be purple-cube cities.
+        if (color === 'purple' && !s.challenges.lab) {
           const min = s.challenges.worldwidePanic ? 2 : 1;
           if (used.filter(c => s.cubes[c].purple > 0).length < min) {
             fail(`At least ${min} of the cards must be cities that have purple cubes`);
@@ -1415,8 +1417,14 @@
         if (line.color) fail('That research line is already characterized');
         const card = a.card;
         if (!isCity(card) || !pl.hand.includes(card)) fail('Play a City card you hold');
-        const color = CITIES[card].color;
-        if (!SEQ_BY_ID[line.seqId].vials.includes(color)) fail("That card's color is not a vial symbol on this Sequence card");
+        // The cure color is the card's own color, or purple (the Mutation disease) when chosen.
+        const color = a.color === 'purple' ? 'purple' : CITIES[card].color;
+        if (!SEQ_BY_ID[line.seqId].vials.includes(color)) fail('That cure colour is not a vial symbol on this Sequence card');
+        if (color === 'purple') {
+          if (!s.colors.includes('purple')) fail('There is no purple disease in this game');
+          // Mutation / Bio-Terrorist: the card used to characterize purple must be a city with a purple cube.
+          if (s.cubes[card].purple < 1) fail('To characterize the purple disease, play a card for a city that has at least 1 purple cube');
+        }
         if (s.cures[color] !== 'none') fail('That disease is already cured');
         // If the other line is already this disease, close it (discard its cards and cubes).
         const other = s.lab.lines[1 - li];
@@ -1492,7 +1500,14 @@
         if (line.tested) fail('That cure is already tested');
         if (!line.filled.some(x => x != null)) fail('A cure cannot be tested until at least 1 cube is on its Sequence card');
         const card = a.card;
-        if (!isCity(card) || !pl.hand.includes(card) || CITIES[card].color !== line.color) fail(`Play a ${line.color} City card`);
+        if (!isCity(card) || !pl.hand.includes(card)) fail('Play a City card you hold');
+        if (line.color === 'purple') {
+          // Worldwide Panic: the card used to test the purple cure must be a city with a purple
+          // cube (which need not be the cube removed). Standard Mutation: any City card.
+          if (s.challenges.worldwidePanic && s.cubes[card].purple < 1) fail('In Worldwide Panic, the card used to test the purple cure must be a city with at least 1 purple cube');
+        } else if (CITIES[card].color !== line.color) {
+          fail(`Play a ${line.color} City card`);
+        }
         const city = validCity(a.city);
         if (s.cubes[city][line.color] < 1) fail(`Remove 1 ${line.color} cube to test: there is none in ${city}`);
         removeOne(pl.hand, card);
@@ -1631,15 +1646,13 @@
         if (!s.colors.includes(color)) fail('Pick a color');
         if (s.cures[color] !== 'none') fail('That disease is already cured');
         // In the Lab challenge the CDC cures as you do: at a research station, from a
-        // completed research line, with 3 cards (not 5). Purple needs no research line.
+        // completed research line (purple included), with 3 cards (not 5).
         const lab = !!s.challenges.lab;
         let labLine = -1;
         if (lab) {
           if (!usableStation(s, human.location, 0)) fail('You must be at a research station for the CDC to discover a cure');
-          if (color !== 'purple') {
-            labLine = s.lab.lines.findIndex(l => l.color === color && lineComplete(s, l));
-            if (labLine < 0) fail('The lab research line for this disease is not complete yet (characterize it, fill its Sequence card, and test the cure)');
-          }
+          labLine = s.lab.lines.findIndex(l => l.color === color && lineComplete(s, l));
+          if (labLine < 0) fail('The lab research line for this disease is not complete yet (characterize it, fill its Sequence card, and test the cure)');
         }
         const need = lab ? 3 : 5;
         const cards = Array.isArray(a.cards) ? a.cards : [];
@@ -1648,7 +1661,9 @@
           if (!isCity(c) || !s.cdc.hand.includes(c)) fail(`The CDC must hold all ${need} cards`);
           if (color !== 'purple' && CITIES[c].color !== color) fail(`All ${need} cards must be ${color}`);
         });
-        if (color === 'purple') {
+        // Outside the Lab challenge, purple needs cities with purple cubes (moved to
+        // characterize/test in the Lab challenge, so any colour is fine there).
+        if (color === 'purple' && !lab) {
           const min = s.challenges.worldwidePanic ? 2 : 1;
           if (cards.filter(c => s.cubes[c].purple > 0).length < min) fail(`At least ${min} of the cards must be cities with purple cubes`);
         }
