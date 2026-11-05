@@ -920,12 +920,19 @@
     if (!isEvent(card)) fail('That is not an event card');
     const key = eventKey(card);
     const ev = EVENTS[key];
+    // Solo: the human may play an Event held by the CDC as if it were their own (it comes
+    // from the CDC's face-up cards and goes to the Player Discard Pile).
+    if (a.fromCdc && (!s.solo || !s.cdc)) fail('There is no CDC in this game');
+    const src = a.fromCdc ? ' (from the CDC)' : '';
 
     // Reminder events stay in play (not in the discard pile) until they expire; the card is
     // only disposed of then. A stored event leaves the game when it finally expires.
     if (REMINDER_EVENTS[key]) {
       let disp;
-      if (a.fromStored) {
+      if (a.fromCdc) {
+        if (!removeOne(s.cdc.hand, card)) fail(`The CDC does not have ${cardName(card)}`);
+        disp = 'discard';
+      } else if (a.fromStored) {
         if (p.stored !== card) fail('That event is not stored on your role card');
         p.stored = null; disp = 'removed';
       } else {
@@ -934,11 +941,14 @@
       }
       if (key === 'infectionZoneBan' && hasActive(s, 'infectionZoneBan')) { /* stacking is harmless */ }
       s.activeEvents.push({ key, owner: pid, card, disp });
-      log(s, `${p.name} played ${ev.name}.`);
+      log(s, `${p.name} played ${ev.name}${src}.`);
       return;
     }
 
-    if (a.fromStored) {
+    if (a.fromCdc) {
+      if (!removeOne(s.cdc.hand, card)) fail(`The CDC does not have ${cardName(card)}`);
+      s.playerDiscard.push(card);
+    } else if (a.fromStored) {
       if (p.stored !== card) fail('That event is not stored on your role card');
       p.stored = null;
       s.removed.push(card);
@@ -947,7 +957,7 @@
     }
     const prm = a.params || {};
     const inActions = s.turn.phase === 'actions';
-    log(s, `${p.name} played ${ev.name}.`);
+    log(s, `${p.name} played ${ev.name}${src}.`);
 
     switch (key) {
       case 'airlift': {
@@ -1616,15 +1626,27 @@
       }
       case 'cdcCure': {
         requireCdc(s, pid);
-        if (s.challenges.lab) fail('In the Lab challenge the CDC cannot discover cures directly');
+        const human = s.players[0];
         const color = a.color;
         if (!s.colors.includes(color)) fail('Pick a color');
         if (s.cures[color] !== 'none') fail('That disease is already cured');
+        // In the Lab challenge the CDC cures as you do: at a research station, from a
+        // completed research line, with 3 cards (not 5). Purple needs no research line.
+        const lab = !!s.challenges.lab;
+        let labLine = -1;
+        if (lab) {
+          if (!usableStation(s, human.location, 0)) fail('You must be at a research station for the CDC to discover a cure');
+          if (color !== 'purple') {
+            labLine = s.lab.lines.findIndex(l => l.color === color && lineComplete(s, l));
+            if (labLine < 0) fail('The lab research line for this disease is not complete yet (characterize it, fill its Sequence card, and test the cure)');
+          }
+        }
+        const need = lab ? 3 : 5;
         const cards = Array.isArray(a.cards) ? a.cards : [];
-        if (new Set(cards).size !== cards.length || cards.length !== 5) fail('Select exactly 5 CDC City cards');
+        if (new Set(cards).size !== cards.length || cards.length !== need) fail(`Select exactly ${need} CDC City cards`);
         cards.forEach(c => {
-          if (!isCity(c) || !s.cdc.hand.includes(c)) fail('The CDC must hold all 5 cards');
-          if (color !== 'purple' && CITIES[c].color !== color) fail(`All 5 cards must be ${color}`);
+          if (!isCity(c) || !s.cdc.hand.includes(c)) fail(`The CDC must hold all ${need} cards`);
+          if (color !== 'purple' && CITIES[c].color !== color) fail(`All ${need} cards must be ${color}`);
         });
         if (color === 'purple') {
           const min = s.challenges.worldwidePanic ? 2 : 1;
@@ -1633,6 +1655,17 @@
         cards.forEach(c => { removeOne(s.cdc.hand, c); s.playerDiscard.push(c); });
         s.cures[color] = 'cured';
         expireEvents(s, (e) => e.key === 'sequencingBreakthrough');
+        // Lab: retire the completed research line's Sequence card and open a fresh one.
+        if (labLine >= 0) {
+          const line = s.lab.lines[labLine];
+          if (line.charCard) s.playerDiscard.push(line.charCard);
+          if (line.testCard) s.playerDiscard.push(line.testCard);
+          clearLineCubes(s, line);
+          s.lab.discard.push(line.seqId);
+          if (!s.lab.deck.length) { s.lab.deck = shuffle(s.lab.discard); s.lab.discard = []; }
+          placeSequence(s, labLine, s.lab.deck.length ? s.lab.deck.pop() : null);
+          log(s, `Research line ${labLine + 1} opened a new Sequence card.`);
+        }
         log(s, `The CDC discovered a cure for ${color}!`);
         s.players.forEach((q, qi) => { if (q.role === 'medic') onEnter(s, qi); });
         checkEradication(s);

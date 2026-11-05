@@ -1144,7 +1144,9 @@ function renderPlayers(g) {
       h('div', { class: 'hdr' }, h('span', { class: 'pawnchip', style: { background: '#6b7a8f' } }),
         h('span', { class: 'nm' }, 'CDC'), h('span', { class: 'loc' }, '🧬 assists you')),
       h('div', { class: 'role' }, h('span', { class: over ? 'over' : '' }, `${g.cdc.hand.length}/7 cards`)),
-      h('div', { class: 'hand' }, g.cdc.hand.map(c => chip(c)))));
+      h('div', { class: 'hand' }, g.cdc.hand.map(c => (g.status === 'playing' && Engine.isEvent(c))
+        ? chip(c, { onclick: () => playEventDialog(c, false, true) })
+        : chip(c)))));
   }
 }
 
@@ -1667,11 +1669,18 @@ function cdcActionsRow(g, add, btn) {
   add(btn('🂠', 'CDC draws', () => send({ type: 'cdcDraw' }), { act: false, disabled: g.playerDeckCount < 1 }));
   add(btn('🔄', 'Reassign role', () => cdcReassignDialog(g), { act: false, disabled: !atStation, title: atStation ? 'Swap your role for an available one' : 'You must be at a research station' }));
   add(btn('🔁', 'Exchange data', () => cdcExchangeDialog(g), { act: false, disabled: !atStation, title: atStation ? 'Swap a city card with the CDC' : 'You must be at a research station' }));
-  if (!g.challenges.lab) {
+  {
+    const lab = g.challenges.lab;
+    const need = lab ? 3 : 5;
+    const lineDone = (col) => col === 'purple' || (g.lab && g.lab.lines.some(l => l.color === col && Engine.labLineComplete(g, l)));
     const colors = gcolors(g).filter(col => g.cures[col] === 'none'
-      && cdc.hand.filter(c => Engine.isCity(c) && (col === 'purple' || CITIES[c].color === col)).length >= 5
-      && (col !== 'purple' || cdc.hand.some(c => Engine.isCity(c) && g.cubes[c].purple > 0)));
-    add(btn('🧪', 'CDC cure', () => cdcCureDialog(g, colors), { act: false, disabled: !colors.length, title: 'The CDC cures by discarding 5 of its same-color cards' }));
+      && cdc.hand.filter(c => Engine.isCity(c) && (col === 'purple' || CITIES[c].color === col)).length >= need
+      && (col !== 'purple' || cdc.hand.some(c => Engine.isCity(c) && g.cubes[c].purple > 0))
+      && (!lab || (atStation && lineDone(col))));
+    const title = lab
+      ? (atStation ? `The CDC cures by discarding ${need} same-color cards from a completed research line` : 'You must be at a research station')
+      : `The CDC cures by discarding ${need} of its same-color cards`;
+    add(btn('🧪', 'CDC cure', () => cdcCureDialog(g, colors, need), { act: false, disabled: !colors.length, title }));
   }
   add(h('span', { class: 'spacer' }), btn('⏭', 'CDC passes', () => send({ type: 'cdcSkip' }), { act: false, class: 'primary' }));
 }
@@ -1713,13 +1722,13 @@ function cdcExchangeDialog(g) {
     (v) => send({ type: 'cdcExchange', giveCard: v.giveCard, takeCard: v.takeCard }));
 }
 
-function cdcCureDialog(g, colors) {
+function cdcCureDialog(g, colors, need = 5) {
   const pickC = (color) => {
     const cards = g.cdc.hand.filter(c => Engine.isCity(c) && (color === 'purple' || CITIES[c].color === color))
       .sort((a, b) => (color === 'purple' ? g.cubes[b].purple - g.cubes[a].purple : 0));
-    const boxes = cards.map((c, i) => ({ c, box: h('input', { type: 'checkbox', checked: i < 5 }) }));
+    const boxes = cards.map((c, i) => ({ c, box: h('input', { type: 'checkbox', checked: i < need }) }));
     openModal(`🧪 CDC cure: ${color}`, h('div', null,
-      h('p', { class: 'muted' }, `Select 5 ${color === 'purple' ? 'City cards (at least 1 from a purple-cube city)' : color + ' cards'} from the CDC.`),
+      h('p', { class: 'muted' }, `Select ${need} ${color === 'purple' ? 'City cards (at least 1 from a purple-cube city)' : color + ' cards'} from the CDC.`),
       boxes.map(({ c, box }) => h('label', { class: 'check' }, box, chip(c), color === 'purple' && g.cubes[c].purple ? ` 🟣×${g.cubes[c].purple}` : ''))),
     [cancelBtn(), h('button', { class: 'primary', onclick: () => { closeModal(); send({ type: 'cdcCure', color, cards: boxes.filter(b => b.box.checked).map(b => b.c) }); } }, 'Discover cure')]);
   };
@@ -1729,11 +1738,11 @@ function cdcCureDialog(g, colors) {
 
 // ------------------------------------------------------------ events
 
-function playEventDialog(card, fromStored) {
+function playEventDialog(card, fromStored, fromCdc) {
   const g = ui.game;
   const key = Engine.eventKey(card);
   const ev = EVENTS[key];
-  const play = (params) => send({ type: 'playEvent', card, fromStored, params });
+  const play = (params) => send({ type: 'playEvent', card, fromStored, fromCdc, params });
   const players = g.players.map((p, i) => [i, `${p.name} (${ROLES[p.role].name})`]);
   const cityOpts = CITY_NAMES.map(c => [c, c]);
   const withCubes = [];
