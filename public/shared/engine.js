@@ -984,9 +984,12 @@
         }
         s.stations.push(city);
         log(s, `Research station built in ${city}.`);
-        if (s.challenges.lab && canAct(s, pid) && s.turn.phase === 'actions') {
+        // In the Lab, placing a station via Government Grant grants a free lab action. The card
+        // can be played from any hand, so the bonus goes to the active player of the current turn
+        // (the one who can actually take a lab action), not necessarily the event's owner.
+        if (s.challenges.lab && s.turn.phase === 'actions' && s.current != null) {
           s.turn.flags.labBonus = true;
-          log(s, `${p.name} may do 1 free lab action.`);
+          log(s, `${s.players[s.current].name} may do 1 free lab action.`);
         }
         break;
       }
