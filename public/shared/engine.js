@@ -1079,10 +1079,18 @@
         break;
       }
       case 'reexaminedResearch': {
-        const i = validPawn(s, prm.player);
+        // Solo: Re-examined Research may give the card to the CDC instead of a player.
+        const toCdc = !!prm.toCdc;
+        if (toCdc && (!s.solo || !s.cdc)) fail('There is no CDC in this game');
+        const i = toCdc ? -1 : validPawn(s, prm.player);
         if (!isCity(prm.card) || !removeOne(s.playerDiscard, prm.card)) fail('Pick a City card from the Player Discard pile');
-        s.players[i].hand.push(prm.card);
-        log(s, `${s.players[i].name} took ${prm.card} from the discard pile.`);
+        if (toCdc) {
+          s.cdc.hand.push(prm.card);
+          log(s, `The CDC took ${prm.card} from the discard pile.`);
+        } else {
+          s.players[i].hand.push(prm.card);
+          log(s, `${s.players[i].name} took ${prm.card} from the discard pile.`);
+        }
         break;
       }
       case 'remoteTreatment': {
@@ -1631,12 +1639,12 @@
         break;
       }
       case 'cdcDiscard': {
-        if (!s.solo || !s.cdc || s.turn.phase !== 'cdc') fail('Nothing for the CDC to discard');
+        if (!s.solo || !s.cdc) fail('There is no CDC in this game');
         if (s.cdc.hand.length <= 7) fail('The CDC is within its 7-card limit');
         if (!removeOne(s.cdc.hand, a.card)) fail('The CDC does not have that card');
         s.playerDiscard.push(a.card);
         log(s, `The CDC discarded ${cardName(a.card)} (hand limit).`);
-        if (s.turn.cdcDrew && s.cdc.hand.length <= 7) endCdcPhase(s);
+        if (s.turn.phase === 'cdc' && s.turn.cdcDrew && s.cdc.hand.length <= 7) endCdcPhase(s);
         break;
       }
       case 'cdcCure': {

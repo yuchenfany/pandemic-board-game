@@ -1144,9 +1144,12 @@ function renderPlayers(g) {
       h('div', { class: 'hdr' }, h('span', { class: 'pawnchip', style: { background: '#6b7a8f' } }),
         h('span', { class: 'nm' }, 'CDC'), h('span', { class: 'loc' }, '🧬 assists you')),
       h('div', { class: 'role' }, h('span', { class: over ? 'over' : '' }, `${g.cdc.hand.length}/7 cards`)),
-      h('div', { class: 'hand' }, g.cdc.hand.map(c => (g.status === 'playing' && Engine.isEvent(c))
-        ? chip(c, { onclick: () => playEventDialog(c, false, true) })
-        : chip(c)))));
+      h('div', { class: 'hand' }, g.cdc.hand.map(c => {
+        if (g.status !== 'playing') return chip(c);
+        if (Engine.isEvent(c)) return chip(c, { onclick: () => playEventDialog(c, false, true) });
+        if (over) return chip(c, { onclick: () => send({ type: 'cdcDiscard', card: c }) });
+        return chip(c);
+      }))));
   }
 }
 
@@ -1796,10 +1799,11 @@ function playEventDialog(card, fromStored, fromCdc) {
     case 'reexaminedResearch': {
       const cards = g.playerDiscard.filter(Engine.isCity);
       if (!cards.length) return toast('No City cards in the discard pile');
+      const recip = (g.solo && g.cdc) ? players.concat([['cdc', 'The CDC']]) : players;
       return openForm(title, ev.text, [
         { name: 'card', label: 'Card', type: 'select', options: cards.map(c => [c, c]) },
-        { name: 'player', label: 'Give to', type: 'select', options: players, value: ui.you }],
-      (v) => play({ card: v.card, player: Number(v.player) }));
+        { name: 'player', label: 'Give to', type: 'select', options: recip, value: ui.you }],
+      (v) => play(v.player === 'cdc' ? { card: v.card, toCdc: true } : { card: v.card, player: Number(v.player) }));
     }
     case 'remoteTreatment': {
       if (!withCubes.length) return toast('There are no cubes on the board');
